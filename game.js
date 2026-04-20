@@ -19,10 +19,10 @@ let gameState = {
 };
 
 // ============ UI NAVIGATION ============
-function setGameMode(mode) {
+function setGameMode(mode, button) {
     gameMode = mode;
     document.querySelectorAll('.mode-btn').forEach(btn => btn.classList.remove('active'));
-    event.target.classList.add('active');
+    button.classList.add('active');
     
     document.getElementById('singlePlayerOptions').classList.toggle('hidden', mode !== 'single');
     document.getElementById('multiplayerOptions').classList.toggle('hidden', mode !== 'multi');
