@@ -51,7 +51,7 @@ function createMultiplayerGame() {
     const startingPlayer = Math.random() < 0.5 ? 'player1' : 'player2';
     
     // Create game in Firebase
-    const gameRef = db.ref(`games/${code}`);
+    const gameRef = window.db.ref(`games/${code}`);
     gameRef.set({
         rows: gameState.rows,
         currentTurn: startingPlayer,
@@ -59,25 +59,29 @@ function createMultiplayerGame() {
         player2Id: null,
         gameActive: true,
         createdAt: Date.now()
-    });
-    
-    gameState.gameRef = gameRef;
-    
-    // Initialize board and show waiting screen
-    renderBoard();
-    document.getElementById('gameCode').classList.remove('hidden');
-    document.getElementById('codeDisplay').textContent = code;
-    document.getElementById('gameState').textContent = 'Waiting for opponent to join with code: ' + code;
-    document.getElementById('submitBtn').disabled = true;
-    
-    showGameScreen();
-    
-    // Wait for opponent
-    gameRef.child('player2Id').on('value', snapshot => {
-        if (snapshot.val() && snapshot.val() !== gameState.currentPlayerId) {
-            gameState.opponentId = snapshot.val();
-            startMultiplayerGame();
-        }
+    }).then(() => {
+        gameState.gameRef = gameRef;
+        
+        // Initialize board and show waiting screen
+        renderBoard();
+        updateGameState();
+        document.getElementById('gameCode').classList.remove('hidden');
+        document.getElementById('codeDisplay').textContent = code;
+        document.getElementById('gameState').textContent = 'Waiting for opponent to join with code: ' + code;
+        document.getElementById('submitBtn').disabled = true;
+        
+        showGameScreen();
+        
+        // Wait for opponent
+        gameRef.child('player2Id').on('value', snapshot => {
+            if (snapshot.val() && snapshot.val() !== gameState.currentPlayerId) {
+                gameState.opponentId = snapshot.val();
+                startMultiplayerGame();
+            }
+        });
+    }).catch(error => {
+        console.error('Failed to create game:', error);
+        alert('Failed to create game. Check your connection and try again.');
     });
 }
 
@@ -98,7 +102,7 @@ function submitGameCode() {
     closeCodeModal();
     
     // Try to join game
-    const gameRef = db.ref(`games/${code}`);
+    const gameRef = window.db.ref(`games/${code}`);
     gameRef.once('value', snapshot => {
         if (!snapshot.exists()) {
             alert('Game code not found!');
@@ -113,6 +117,9 @@ function submitGameCode() {
         // Start listening for game updates
         startMultiplayerGame();
         showGameScreen();
+    }).catch(error => {
+        console.error('Failed to join game:', error);
+        alert('Failed to join game. Check your connection and try again.');
     });
 }
 
@@ -314,7 +321,9 @@ function submitMove() {
     if (isGameOver()) {
         gameState.gameOver = true;
         if (gameMode === 'multi') {
-            gameState.gameRef.update({ gameActive: false, currentTurn: gameState.currentPlayerId });
+            gameState.gameRef.update({ gameActive: false, currentTurn: gameState.currentPlayerId }).catch(error => {
+                console.error('Failed to update game over:', error);
+            });
         }
         updateGameState();
         return;
@@ -330,6 +339,8 @@ function submitMove() {
         gameState.gameRef.update({
             rows: gameState.rows,
             currentTurn: nextTurn
+        }).catch(error => {
+            console.error('Failed to update game:', error);
         });
     }
 }
