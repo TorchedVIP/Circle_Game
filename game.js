@@ -42,6 +42,11 @@ function startSinglePlayer() {
 }
 
 function createMultiplayerGame() {
+    if (!window.db) {
+        alert('Firebase is not initialized yet. Please refresh the page and try again.');
+        return;
+    }
+    
     const code = generateGameCode();
     gameState.gameCode = code;
     gameState.currentPlayerId = 'player1';
@@ -90,6 +95,11 @@ function joinMultiplayerGame() {
 }
 
 function submitGameCode() {
+    if (!window.db) {
+        alert('Firebase is not initialized yet. Please refresh the page and try again.');
+        return;
+    }
+    
     const code = document.getElementById('codeInput').value.trim().padStart(3, '0');
     if (code.length !== 3 || !/^\d{3}$/.test(code)) {
         alert('Code must be 3 digits');
