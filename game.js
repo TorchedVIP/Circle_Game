@@ -113,7 +113,7 @@ function submitGameCode() {
     
     // Try to join game
     const gameRef = window.db.ref(`games/${code}`);
-    gameRef.once('value', snapshot => {
+    gameRef.once('value').then(snapshot => {
         if (!snapshot.exists()) {
             alert('Game code not found!');
             return;
