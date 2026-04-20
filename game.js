@@ -63,7 +63,8 @@ function createMultiplayerGame() {
     
     gameState.gameRef = gameRef;
     
-    // Show waiting screen
+    // Initialize board and show waiting screen
+    renderBoard();
     document.getElementById('gameCode').classList.remove('hidden');
     document.getElementById('codeDisplay').textContent = code;
     document.getElementById('gameState').textContent = 'Waiting for opponent to join with code: ' + code;
