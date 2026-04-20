@@ -379,8 +379,8 @@
     </div>
 
     <!-- Firebase SDK via official Firebase CDN -->
-    <script src="https://www.gstatic.com/firebasejs/11.0.1/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/11.0.1/firebase-database-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/11.26.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/11.26.0/firebase-database-compat.js"></script>
     
     <!-- Game Initialization -->
     <script>
@@ -395,9 +395,27 @@
             appId: "1:641690151231:web:2c2b1e7c8a4e3f5d6c7e8f"
         };
 
-        // Initialize Firebase
-        firebase.initializeApp(firebaseConfig);
-        window.db = firebase.database();
+        function initializeFirebase() {
+            if (!window.firebase || typeof firebase.initializeApp !== 'function') {
+                console.error('Firebase SDK did not load correctly.');
+                alert('Unable to load Firebase SDK. Check your internet connection or site permissions.');
+                return false;
+            }
+
+            try {
+                const app = firebase.initializeApp(firebaseConfig);
+                window.db = firebase.database(app);
+                window.firebaseReady = true;
+                console.log('Firebase initialized successfully:', firebaseConfig.databaseURL);
+                return true;
+            } catch (error) {
+                console.error('Firebase initialization failed:', error);
+                alert('Firebase initialization failed. Check the browser console for details.');
+                return false;
+            }
+        }
+
+        initializeFirebase();
     </script>
     
     <!-- Game Script -->
