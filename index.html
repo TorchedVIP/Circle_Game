@@ -48,7 +48,7 @@
             font-weight: bold;
         }
 
-        #gameState.computer-turn {
+        #gameState.opponent-turn {
             color: #764ba2;
             font-weight: bold;
         }
@@ -148,23 +148,13 @@
             cursor: not-allowed;
         }
 
-        #resetBtn {
+        #mainMenuBtn {
             background: #95a5a6;
             color: white;
         }
 
-        #resetBtn:hover {
+        #mainMenuBtn:hover {
             background: #7f8c8d;
-            transform: translateY(-2px);
-        }
-
-        #settingsBtn {
-            background: #f39c12;
-            color: white;
-        }
-
-        #settingsBtn:hover {
-            background: #e67e22;
         }
 
         .modal {
@@ -203,14 +193,59 @@
             font-size: 16px;
         }
 
-        .modal-content input[type="radio"] {
+        .modal-content input[type="radio"],
+        .modal-content input[type="text"] {
             margin-right: 10px;
+        }
+
+        .modal-content input[type="text"] {
+            padding: 10px;
+            font-size: 18px;
+            width: 100px;
+            text-align: center;
+            letter-spacing: 5px;
         }
 
         .modal-content button {
             margin-top: 20px;
             padding: 12px 30px;
             font-size: 16px;
+            background: #667eea;
+            color: white;
+        }
+
+        .modal-content button:hover {
+            background: #5568d3;
+        }
+
+        .modal-content .cancel-btn {
+            background: #95a5a6;
+            margin-left: 10px;
+        }
+
+        .modal-content .cancel-btn:hover {
+            background: #7f8c8d;
+        }
+
+        .game-code {
+            text-align: center;
+            margin: 20px 0;
+            padding: 15px;
+            background: #f0f0f0;
+            border-radius: 8px;
+        }
+
+        .game-code p {
+            margin: 5px 0;
+            color: #666;
+        }
+
+        .game-code .code {
+            font-size: 28px;
+            font-weight: bold;
+            color: #667eea;
+            letter-spacing: 3px;
+            font-family: 'Courier New', monospace;
         }
 
         .info-text {
@@ -219,56 +254,135 @@
             font-size: 14px;
             margin-top: 20px;
         }
+
+        .mode-toggle {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            margin-bottom: 20px;
+        }
+
+        .mode-btn {
+            padding: 10px 20px;
+            background: #f0f0f0;
+            color: #333;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .mode-btn.active {
+            background: #667eea;
+            color: white;
+            border-color: #667eea;
+        }
+
+        .mode-btn:hover {
+            transform: translateY(-2px);
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        #singlePlayerOptions button,
+        #multiplayerOptions button {
+            width: 100%;
+            margin: 10px 0;
+            padding: 15px;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>⭕ Circle Game</h1>
         
-        <div id="gameState">Select circles to remove from rows. Click a circle to select/deselect it.</div>
+        <!-- Main Menu Screen -->
+        <div id="mainMenuScreen">
+            <div class="mode-toggle">
+                <button class="mode-btn active" onclick="setGameMode('single')">Play vs Computer</button>
+                <button class="mode-btn" onclick="setGameMode('multi')">Play with Friend</button>
+            </div>
 
-        <div class="board" id="board"></div>
+            <!-- Single Player Options -->
+            <div id="singlePlayerOptions">
+                <label style="display: block; margin: 15px 0; font-size: 16px;">
+                    <input type="radio" name="difficulty" value="easy"> Easy
+                </label>
+                <label style="display: block; margin: 15px 0; font-size: 16px;">
+                    <input type="radio" name="difficulty" value="medium" checked> Medium
+                </label>
+                <label style="display: block; margin: 15px 0; font-size: 16px;">
+                    <input type="radio" name="difficulty" value="hard"> Hard
+                </label>
+                <button onclick="startSinglePlayer()" style="background: #667eea; color: white;">Start Game</button>
+            </div>
 
-        <div class="controls">
-            <button id="submitBtn" onclick="submitMove()">Submit Move</button>
-            <button id="resetBtn" onclick="resetGame()">New Game</button>
-            <button id="settingsBtn" onclick="showSettings()">Settings</button>
+            <!-- Multiplayer Options -->
+            <div id="multiplayerOptions" class="hidden">
+                <button onclick="createMultiplayerGame()" style="background: #27ae60; color: white;">Create Game</button>
+                <button onclick="joinMultiplayerGame()" style="background: #3498db; color: white;">Join Game</button>
+            </div>
+
+            <div class="info-text">
+                💡 The player who takes the last circle loses!
+            </div>
         </div>
 
-        <div class="info-text">
-            💡 The player who takes the last circle loses!
+        <!-- Game Screen -->
+        <div id="gameScreen" class="hidden">
+            <div id="gameState">Loading...</div>
+            <div id="gameCode" class="game-code hidden">
+                <p>Your Code:</p>
+                <div class="code" id="codeDisplay"></div>
+            </div>
+
+            <div class="board" id="board"></div>
+
+            <div class="controls">
+                <button id="submitBtn" onclick="submitMove()">Submit Move</button>
+                <button id="mainMenuBtn" onclick="returnToMainMenu()">Main Menu</button>
+            </div>
+
+            <div class="info-text">
+                💡 The player who takes the last circle loses!
+            </div>
         </div>
     </div>
 
-    <div id="settingsModal" class="modal">
+    <!-- Code Input Modal -->
+    <div id="codeModal" class="modal">
         <div class="modal-content">
-            <h2>Game Settings</h2>
-            
-            <label>
-                <input type="radio" name="difficulty" value="easy"> Easy
-            </label>
-            <label>
-                <input type="radio" name="difficulty" value="medium" checked> Medium
-            </label>
-            <label>
-                <input type="radio" name="difficulty" value="hard"> Hard
-            </label>
-
-            <label style="margin-top: 30px;">
-                <input type="radio" name="turn-order" value="player-first" checked> You go first
-            </label>
-            <label>
-                <input type="radio" name="turn-order" value="computer-first"> Computer goes first
-            </label>
-            <label>
-                <input type="radio" name="turn-order" value="random"> Random
-            </label>
-
-            <button onclick="applySettings()" style="background: #667eea; color: white;">Apply & Start Game</button>
-            <button onclick="closeSettings()" style="background: #95a5a6; color: white; margin-left: 10px;">Cancel</button>
+            <h2>Join Game</h2>
+            <p>Enter the 3-digit game code:</p>
+            <input type="text" id="codeInput" maxlength="3" placeholder="000" style="margin: 20px 0;">
+            <br>
+            <button onclick="submitGameCode()">Join</button>
+            <button class="cancel-btn" onclick="closeCodeModal()">Cancel</button>
         </div>
     </div>
 
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebaseapp/11.0.0/firebase-app-compat.min.js"></script>
+    <script src="https://www.gstatic.com/firebaseapp/11.0.0/firebase-database-compat.min.js"></script>
+    
+    <!-- Game Script -->
+    <script>
+        // Firebase Configuration
+        const firebaseConfig = {
+            apiKey: "AIzaSyAKl2lZxDa-SfVjPvJqZj7KoVjqKMyS5pU",
+            authDomain: "circle-game-8caf0.firebaseapp.com",
+            projectId: "circle-game-8caf0",
+            storageBucket: "circle-game-8caf0.firebasestorage.app",
+            messagingSenderId: "641690151231",
+            appId: "1:641690151231:web:2c2b1e7c8a4e3f5d6c7e8f"
+        };
+
+        // Initialize Firebase
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.database();
+    </script>
     <script src="game.js"></script>
 </body>
 </html>
