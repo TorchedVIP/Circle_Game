@@ -337,9 +337,9 @@ function updateGameState() {
     if (gameState.gameOver) {
         stateDiv.className = 'game-over';
         if (gameState.isPlayerTurn) {
-            stateDiv.textContent = '🎉 You win! Computer took the last circle.';
-        } else {
             stateDiv.textContent = '💻 Computer wins! You took the last circle.';
+        } else {
+            stateDiv.textContent = '🎉 You win! Computer took the last circle.';
         }
         document.getElementById('submitBtn').disabled = true;
         return;
