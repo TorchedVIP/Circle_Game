@@ -307,22 +307,37 @@
 
             <!-- Single Player Options -->
             <div id="singlePlayerOptions">
-                <label style="display: block; margin: 15px 0; font-size: 16px;">
-                    <input type="radio" name="difficulty" value="easy"> Easy
-                </label>
-                <label style="display: block; margin: 15px 0; font-size: 16px;">
-                    <input type="radio" name="difficulty" value="medium" checked> Medium
-                </label>
-                <label style="display: block; margin: 15px 0; font-size: 16px;">
-                    <input type="radio" name="difficulty" value="hard"> Hard
-                </label>
+                <div style="margin: 20px 0;">
+                    <div style="font-weight: bold; margin-bottom: 10px; color: #333;">Difficulty:</div>
+                    <label style="display: block; margin: 10px 0; font-size: 16px;">
+                        <input type="radio" name="difficulty" value="easy"> Easy
+                    </label>
+                    <label style="display: block; margin: 10px 0; font-size: 16px;">
+                        <input type="radio" name="difficulty" value="medium" checked> Medium
+                    </label>
+                    <label style="display: block; margin: 10px 0; font-size: 16px;">
+                        <input type="radio" name="difficulty" value="hard"> Hard
+                    </label>
+                </div>
+                <div style="margin: 20px 0;">
+                    <div style="font-weight: bold; margin-bottom: 10px; color: #333;">Who starts first:</div>
+                    <label style="display: block; margin: 10px 0; font-size: 16px;">
+                        <input type="radio" name="turn-order" value="player-first" checked> Me
+                    </label>
+                    <label style="display: block; margin: 10px 0; font-size: 16px;">
+                        <input type="radio" name="turn-order" value="computer-first"> Computer
+                    </label>
+                    <label style="display: block; margin: 10px 0; font-size: 16px;">
+                        <input type="radio" name="turn-order" value="random"> Random
+                    </label>
+                </div>
                 <button onclick="startSinglePlayer()" style="background: #667eea; color: white;">Start Game</button>
             </div>
 
             <!-- Multiplayer Options -->
             <div id="multiplayerOptions" class="hidden">
-                <button onclick="createMultiplayerGame()" style="background: #27ae60; color: white;">Create Game</button>
-                <button onclick="joinMultiplayerGame()" style="background: #3498db; color: white;">Join Game</button>
+                <button onclick="createMultiplayerGame()" style="width: 100%; padding: 15px; margin: 10px 0; background: #27ae60; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 16px; font-weight: bold;">Create Game</button>
+                <button onclick="joinMultiplayerGame()" style="width: 100%; padding: 15px; margin: 10px 0; background: #3498db; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 16px; font-weight: bold;">Join Game</button>
             </div>
 
             <div class="info-text">

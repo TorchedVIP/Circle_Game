@@ -15,7 +15,8 @@ let gameState = {
     currentPlayerId: null,
     opponentId: null,
     gameCode: null,
-    gameRef: null
+    gameRef: null,
+    turnOrder: 'player-first'
 };
 
 // ============ UI NAVIGATION ============
@@ -30,7 +31,9 @@ function setGameMode(mode, button) {
 
 function startSinglePlayer() {
     const difficulty = document.querySelector('input[name="difficulty"]:checked').value;
+    const turnOrder = document.querySelector('input[name="turn-order"]:checked').value;
     gameState.difficulty = difficulty;
+    gameState.turnOrder = turnOrder;
     gameState.currentPlayerId = 'player';
     gameMode = 'single';
     
@@ -44,11 +47,14 @@ function createMultiplayerGame() {
     gameState.currentPlayerId = 'player1';
     gameMode = 'multi';
     
+    // Randomly determine who starts first
+    const startingPlayer = Math.random() < 0.5 ? 'player1' : 'player2';
+    
     // Create game in Firebase
     const gameRef = db.ref(`games/${code}`);
     gameRef.set({
         rows: gameState.rows,
-        currentTurn: 'player1',
+        currentTurn: startingPlayer,
         player1Id: gameState.currentPlayerId,
         player2Id: null,
         gameActive: true,
@@ -166,7 +172,17 @@ function initGame() {
     };
     gameState.selected = {};
     gameState.gameOver = false;
-    gameState.isPlayerTurn = true;
+    
+    // Determine who goes first based on turn order preference
+    if (gameState.turnOrder === 'player-first') {
+        gameState.isPlayerTurn = true;
+    } else if (gameState.turnOrder === 'computer-first') {
+        gameState.isPlayerTurn = false;
+    } else {
+        // Random
+        gameState.isPlayerTurn = Math.random() < 0.5;
+    }
+    
     renderBoard();
     updateGameState();
 }
