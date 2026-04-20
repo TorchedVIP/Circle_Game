@@ -508,11 +508,3 @@ window.onload = () => {
         difficultyRadio.checked = true;
     }
 };
-
-
-// Start the game on page load
-window.onload = () => {
-    document.querySelector('input[name="difficulty"][value="medium"]').checked = true;
-    document.querySelector('input[name="turn-order"][value="player-first"]').checked = true;
-    initGame();
-};
