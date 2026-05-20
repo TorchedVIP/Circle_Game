@@ -2,10 +2,6 @@
   "singlePlayer": {
     "easy": [
       {
-        "name": "You",
-        "wins": 5
-      },
-      {
         "name": "VIP",
         "wins": 5
       },
@@ -18,10 +14,6 @@
       {
         "name": "VIP",
         "wins": 14
-      },
-      {
-        "name": "name",
-        "wins": 5
       },
       {
         "name": "Nerd",
@@ -76,17 +68,13 @@
     }
   ],
   "passwords": {
-    "vip": "9b9ec6d20cabbe285881cb42627c08c69444bfda22a2d2e7d84dc9cf02b20d90",
     "triuser": "8a6ae15122001229edb8866f56e342af12ae8187203c3e3b33931743e7c0c48d",
     "nerd": "f3176ea4064dc47ccab85eb06a79460c0a07325bfdc3da7863dbd974031ee89b",
     "l0n3w01f": "5117c06365cd53e017ba9772c6b57ae6370ee37d5654587ef3825e85f1e3092a",
-    "lillyma3": "eaa9b032d4b19af060f11df6e327b4bdfa767c16c819d54199f6bd4dc98d1bc9"
+    "lillyma3": "eaa9b032d4b19af060f11df6e327b4bdfa767c16c819d54199f6bd4dc98d1bc9",
+    "vip": "9b9ec6d20cabbe285881cb42627c08c69444bfda22a2d2e7d84dc9cf02b20d90"
   },
   "achievements": {
-    "you": [
-      "doubles",
-      "beginning"
-    ],
     "vip": [
       "doubles",
       "beginning",

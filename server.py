@@ -21,6 +21,10 @@ MAPS = {
     'gigantic': [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 }
 
+# ── Admin credentials ──────────────────────────────────────────────────────
+ADMIN_USERNAME = 'vip'
+ADMIN_PASSWORD = 'D0_nO7_op3N_D347h_1nsId3'
+
 
 def roll_dice_for(rows):
     return random.randint(1, 5)
@@ -41,20 +45,34 @@ def make_rows(map_name='classic'):
     return rows
 
 
+# ── Batched Scoreboard I/O ─────────────────────────────────────────────────
+# Keep scoreboard in memory; flush to disk every FLUSH_EVERY write operations.
+FLUSH_EVERY = 20
+
+_scoreboard_cache = None
+_write_count = 0
+
+
 def load_scoreboard():
+    global _scoreboard_cache
+    if _scoreboard_cache is not None:
+        return _scoreboard_cache
+
     if not os.path.exists(SCOREBOARD_FILE):
         template = os.path.join(os.path.dirname(SCOREBOARD_FILE), 'scoreboard.template.json')
         if os.path.exists(template):
             import shutil
             shutil.copy(template, SCOREBOARD_FILE)
         else:
-            return {
+            _scoreboard_cache = {
                 'singlePlayer': {'easy': [], 'medium': [], 'hard': []},
                 'multiplayer': [],
                 'passwords': {},
                 'achievements': {},
                 'users': {}
             }
+            return _scoreboard_cache
+
     with open(SCOREBOARD_FILE, 'r') as f:
         data = json.load(f)
     if 'passwords' not in data:
@@ -63,12 +81,26 @@ def load_scoreboard():
         data['achievements'] = {}
     if 'users' not in data:
         data['users'] = {}
-    return data
+    _scoreboard_cache = data
+    return _scoreboard_cache
 
 
 def save_scoreboard(data):
-    with open(SCOREBOARD_FILE, 'w') as f:
-        json.dump(data, f, indent=2)
+    """Mark a write. Flushes to disk every FLUSH_EVERY writes."""
+    global _scoreboard_cache, _write_count
+    _scoreboard_cache = data
+    _write_count += 1
+    if _write_count >= FLUSH_EVERY:
+        flush_scoreboard()
+
+
+def flush_scoreboard():
+    """Force write the cached scoreboard to disk."""
+    global _write_count
+    if _scoreboard_cache is not None:
+        with open(SCOREBOARD_FILE, 'w') as f:
+            json.dump(_scoreboard_cache, f, indent=2)
+    _write_count = 0
 
 
 def hash_password(pw_sequence):
@@ -233,6 +265,106 @@ async def get_scoreboard(request):
     # Don't expose raw passwords or user hashes
     safe = {k: v for k, v in board.items() if k not in ('passwords', 'users')}
     return web.json_response(safe)
+
+
+# ── Admin Endpoints ────────────────────────────────────────────────────────
+
+async def admin_reset_password(request):
+    """POST /admin/reset-password — body {adminPassword, targetName, newSequence:[int,...]}
+    Requires the caller to be logged in as VIP and provide the admin password.
+    Resets the triangle password for targetName."""
+    try:
+        data = await request.json()
+    except Exception:
+        return web.json_response({'error': 'Invalid JSON'}, status=400)
+
+    admin_password = str(data.get('adminPassword', ''))
+    target_name = str(data.get('targetName', '')).strip()[:20].lower()
+    new_sequence = data.get('newSequence', [])
+
+    if admin_password != ADMIN_PASSWORD:
+        return web.json_response({'error': 'Unauthorized'}, status=403)
+
+    if not target_name:
+        return web.json_response({'error': 'Target name required'}, status=400)
+
+    if not new_sequence or len(new_sequence) < 1:
+        return web.json_response({'error': 'New password sequence required'}, status=400)
+
+    board = load_scoreboard()
+
+    # Set or overwrite the password for the target user
+    board['passwords'][target_name] = hash_password(new_sequence)
+    save_scoreboard(board)
+
+    return web.json_response({'ok': True, 'message': f'Password reset for {target_name}'})
+
+
+async def admin_delete_password(request):
+    """POST /admin/delete-password — body {adminPassword, targetName}
+    Removes the password for targetName so they can set a new one."""
+    try:
+        data = await request.json()
+    except Exception:
+        return web.json_response({'error': 'Invalid JSON'}, status=400)
+
+    admin_password = str(data.get('adminPassword', ''))
+    target_name = str(data.get('targetName', '')).strip()[:20].lower()
+
+    if admin_password != ADMIN_PASSWORD:
+        return web.json_response({'error': 'Unauthorized'}, status=403)
+
+    if not target_name:
+        return web.json_response({'error': 'Target name required'}, status=400)
+
+    board = load_scoreboard()
+
+    if target_name in board.get('passwords', {}):
+        del board['passwords'][target_name]
+        save_scoreboard(board)
+        return web.json_response({'ok': True, 'message': f'Password deleted for {target_name}'})
+    else:
+        return web.json_response({'error': 'User has no password set'}, status=404)
+
+
+async def admin_delete_user(request):
+    """POST /admin/delete-user — body {adminPassword, targetName}
+    Deletes a user entirely: password, achievements, and all leaderboard entries."""
+    try:
+        data = await request.json()
+    except Exception:
+        return web.json_response({'error': 'Invalid JSON'}, status=400)
+
+    admin_password = str(data.get('adminPassword', ''))
+    target_name = str(data.get('targetName', '')).strip()[:20].lower()
+
+    if admin_password != ADMIN_PASSWORD:
+        return web.json_response({'error': 'Unauthorized'}, status=403)
+
+    if not target_name:
+        return web.json_response({'error': 'Target name required'}, status=400)
+
+    board = load_scoreboard()
+
+    # Remove password
+    board.get('passwords', {}).pop(target_name, None)
+
+    # Remove achievements
+    board.get('achievements', {}).pop(target_name, None)
+
+    # Remove from users dict
+    board.get('users', {}).pop(target_name, None)
+
+    # Remove from single player leaderboards
+    for diff in ('easy', 'medium', 'hard'):
+        entries = board.get('singlePlayer', {}).get(diff, [])
+        board['singlePlayer'][diff] = [e for e in entries if e['name'].lower() != target_name]
+
+    # Remove from multiplayer leaderboard
+    board['multiplayer'] = [e for e in board.get('multiplayer', []) if e['name'].lower() != target_name]
+
+    save_scoreboard(board)
+    return web.json_response({'ok': True, 'message': f'User "{target_name}" fully deleted'})
 
 
 async def post_single_score(request):
@@ -467,12 +599,22 @@ app.router.add_post('/password/set', set_password)
 app.router.add_post('/password/verify', verify_password)
 app.router.add_get('/achievements', get_achievements)
 app.router.add_post('/achievements/unlock', unlock_achievement)
+app.router.add_post('/admin/reset-password', admin_reset_password)
+app.router.add_post('/admin/delete-password', admin_delete_password)
+app.router.add_post('/admin/delete-user', admin_delete_user)
 app.router.add_get('/themes', lambda r: web.FileResponse(
     os.path.join(os.path.dirname(os.path.abspath(__file__)), 'themes.json'),
     headers=NO_CACHE_HEADERS))
 app.router.add_get('/ws', websocket_handler)
 app.router.add_get('/', index_handler)
 app.router.add_get('/{path:.*}', static_handler)
+
+
+async def on_shutdown(app):
+    """Flush any pending scoreboard writes to disk on server shutdown."""
+    flush_scoreboard()
+
+app.on_shutdown.append(on_shutdown)
 
 if __name__ == '__main__':
     web.run_app(app, host='0.0.0.0', port=5000)

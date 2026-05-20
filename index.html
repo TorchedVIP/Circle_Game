@@ -946,10 +946,6 @@
 
             <!-- Single Player Options -->
             <div id="singlePlayerOptions">
-                <div class="name-input-group">
-                    <div class="label">Your name:</div>
-                    <input type="text" id="singlePlayerName" class="name-text-input" placeholder="Enter your name" maxlength="20">
-                </div>
                 <div style="margin: 20px 0;">
                     <div style="font-weight: bold; margin-bottom: 10px; color: #333;">Difficulty:</div>
                     <label style="display: block; margin: 10px 0; font-size: 16px;">
@@ -1087,10 +1083,6 @@
 
             <!-- Local 2-Player Options -->
             <div id="localOptions" class="hidden">
-                <div class="name-input-group">
-                    <div class="label">Player 1 name:</div>
-                    <input type="text" id="localPlayer1Name" class="name-text-input" placeholder="Enter Player 1 name" maxlength="20">
-                </div>
                 <div class="name-input-group" style="margin-top: 10px;">
                     <div class="label">Player 2 name:</div>
                     <input type="text" id="localPlayer2Name" class="name-text-input" placeholder="Enter Player 2 name" maxlength="20">
@@ -1181,10 +1173,6 @@
 
             <!-- Multiplayer Options -->
             <div id="multiplayerOptions" class="hidden">
-                <div class="name-input-group" style="margin-top: 10px;">
-                    <div class="label">Your name:</div>
-                    <input type="text" id="multiPlayerName" class="name-text-input" placeholder="Enter your name" maxlength="20">
-                </div>
                 <div style="margin: 20px 0;">
                     <div style="font-weight: bold; margin-bottom: 10px; color: #333;">Map (when creating):</div>
                     <label style="display: block; margin: 10px 0; font-size: 16px;">
@@ -1292,6 +1280,7 @@
                         <div id="unlockedThemes" style="margin-top:8px;"></div>
                     </div>
                     <button class="sidebar-btn sidebar-btn-logout" onclick="logout()">🚪 Logout</button>
+                    <button class="sidebar-btn hidden" id="adminBtn" onclick="showAdminPanel()" style="background:#fff3e0;color:#e65100;border-color:#ffb300;">🔧 Admin</button>
                 </div>
             </div><!-- end .main-menu-layout -->
         </div>
@@ -1363,10 +1352,6 @@
     <div id="codeModal" class="modal">
         <div class="modal-content">
             <h2>Join Game</h2>
-            <div class="name-input-group" style="text-align: left;">
-                <div class="label" style="font-weight: bold; margin-bottom: 8px; color: #333;">Your name:</div>
-                <input type="text" id="joinPlayerName" class="name-text-input" placeholder="Enter your name" maxlength="20">
-            </div>
             <p style="margin-top: 12px;">Enter the 3-digit game code:</p>
             <input type="text" id="codeInput" maxlength="3" placeholder="000">
             <br>
@@ -1487,6 +1472,28 @@
                 <button onclick="pwdClear()" style="background:#f0f0f0; color:#333; padding:10px 16px; font-size:14px;">Clear</button>
                 <button onclick="pwdSubmit()" style="background:linear-gradient(135deg,#667eea,#764ba2); color:white; padding:10px 20px; font-size:14px;">Confirm</button>
                 <button onclick="pwdCancel()" style="background:#eee; color:#666; padding:10px 16px; font-size:14px;">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Admin Modal -->
+    <div id="adminModal" class="modal">
+        <div class="modal-content" style="max-width:420px; text-align:left;">
+            <h2 style="text-align:center;">🔧 Admin Panel</h2>
+            <p style="color:#666; font-size:13px; margin-bottom:14px; text-align:center;">Reset passwords for players</p>
+            <div style="margin-bottom:14px;">
+                <label style="display:block; font-size:13px; font-weight:600; color:#555; margin-bottom:4px;">Admin Password</label>
+                <input type="password" id="adminPasswordInput" style="width:100%; padding:10px; font-size:14px; border:2px solid #ddd; border-radius:8px; box-sizing:border-box;" placeholder="Enter admin password">
+            </div>
+            <div style="margin-bottom:14px;">
+                <label style="display:block; font-size:13px; font-weight:600; color:#555; margin-bottom:4px;">Target Username</label>
+                <input type="text" id="adminTargetName" style="width:100%; padding:10px; font-size:14px; border:2px solid #ddd; border-radius:8px; box-sizing:border-box;" placeholder="Username to reset" maxlength="20">
+            </div>
+            <div id="adminError" style="color:#e74c3c; font-size:13px; min-height:18px; margin-bottom:10px; text-align:center;"></div>
+            <div style="display:flex; gap:8px; justify-content:center; flex-wrap:wrap;">
+                <button onclick="adminResetPassword()" style="background:#e74c3c; color:white; padding:10px 18px; font-size:14px;">Delete Password</button>
+                <button onclick="adminDeleteUser()" style="background:#1a1a1a; color:white; padding:10px 18px; font-size:14px;">Delete User</button>
+                <button onclick="closeAdminPanel()" style="background:#95a5a6; color:white; padding:10px 18px; font-size:14px;">Close</button>
             </div>
         </div>
     </div>

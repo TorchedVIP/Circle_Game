@@ -28,19 +28,22 @@ function showMainMenu() {
     const cont = document.querySelector('.container');
     if (cont) cont.classList.remove('login-mode');
     const sidebarUser = document.getElementById('sidebarUser');
+    const adminBtn = document.getElementById('adminBtn');
     if (currentUser) {
         if (sidebarUser) sidebarUser.textContent = `👤 ${currentUser.username}`;
-        const sp = document.getElementById('singlePlayerName');
-        if (sp) sp.value = currentUser.username;
-        const mp = document.getElementById('multiPlayerName');
-        if (mp) mp.value = currentUser.username;
         gameState.playerName = currentUser.username;
+        // Show admin button only for VIP
+        if (adminBtn) {
+            if (currentUser.username.toLowerCase() === 'vip') adminBtn.classList.remove('hidden');
+            else adminBtn.classList.add('hidden');
+        }
         refreshUnlocks();
         loadAchievements(currentUser.username);
         checkWinAchievements(currentUser.username);
         startTutorialBlink();
     } else {
         if (sidebarUser) sidebarUser.textContent = 'Guest';
+        if (adminBtn) adminBtn.classList.add('hidden');
     }
 }
 
@@ -59,7 +62,19 @@ async function submitLogin() {
         const checkData = await checkRes.json();
 
         if (!checkData.exists) {
-            errorEl.textContent = 'No account found. Click Register to create one.';
+            // No password exists — offer to create one for this username
+            const ok = await openPasswordModal(username, 'set');
+            if (ok) {
+                currentUser = { username };
+                localStorage.setItem('circleGameUser', JSON.stringify(currentUser));
+                document.getElementById('loginUsername').value = '';
+                errorEl.textContent = '';
+                showMainMenu();
+                loadAchievements(username);
+                checkWinAchievements(username);
+            } else {
+                errorEl.textContent = 'Password setup cancelled.';
+            }
             return;
         }
 
@@ -123,6 +138,8 @@ async function submitRegister() {
         errorEl.textContent = '';
         showMainMenu();
         loadAchievements(username);
+        // Auto-start tutorial for new accounts
+        setTimeout(() => showTutorial(), 300);
     } catch (err) {
         errorEl.textContent = 'Connection error. Please try again.';
     }
@@ -409,9 +426,8 @@ function startSinglePlayer() {
 
 function oneDeviceMulti() {
     const map = document.querySelector('input[name="local-map"]:checked').value;
-    const p1Name = document.getElementById('localPlayer1Name').value.trim();
+    const p1Name = currentUser ? currentUser.username : 'Player 1';
     const p2Name = document.getElementById('localPlayer2Name').value.trim();
-    if (!p1Name) { alert('Please enter Player 1\'s name.'); return; }
     if (!p2Name) { alert('Please enter Player 2\'s name.'); return; }
 
     gameState.playerName  = p1Name;
@@ -424,7 +440,6 @@ function oneDeviceMulti() {
     gameState.sandMode    = isModeEnabled('localSandModeOption', 'localSandModeCheckbox');
     gameState.portalMode  = isModeEnabled('localPortalModeOption', 'localPortalModeCheckbox');
     gameMode = 'local';
-    localStorage.setItem('localPlayer1Name', p1Name);
     localStorage.setItem('localPlayer2Name', p2Name);
     unlockAchievement('close');
     initGame();
@@ -467,7 +482,6 @@ function joinMultiplayerGame() {
         alert('Please login first to join a game');
         return;
     }
-    document.getElementById('joinPlayerName').value = currentUser.username;
     document.getElementById('codeModal').classList.add('show');
 }
 
@@ -1092,15 +1106,13 @@ const PORTAL_COLORS = ['#9b59b6', '#1abc9c', '#e67e22']; // purple, teal, orange
 
 // ============ SAND MODE (GRAVITY) ============
 // After circles are removed, unsupported circles fall down.
-// A circle at (row r, pos p) is supported if the row below (r+1) has a circle at pos p or p+1.
-// If unsupported and both landing spots are empty, 50/50 left or right.
+// A circle needs BOTH supports below (pos p and p+1) to stay.
+// If only left supports it, it falls right. If only right, it falls left.
+// If neither supports it, it falls to whichever side is open (50/50 if both).
 function applySandGravity() {
     if (!gameState.sandMode) return;
 
     const rowNums = Object.keys(gameState.rows).map(Number).sort((a, b) => a - b);
-
-    // In our board: 0 = circle present, 1 = removed/empty
-    // Classic triangle: row r has r circles, row r+1 has r+1 (wider by 1, offset half-step)
 
     let changed = true;
     let iterations = 0;
@@ -1108,7 +1120,6 @@ function applySandGravity() {
         changed = false;
         iterations++;
 
-        // Process top to bottom — circles fall down
         for (let ri = 0; ri < rowNums.length - 1; ri++) {
             const r = rowNums[ri];
             const belowR = rowNums[ri + 1];
@@ -1118,29 +1129,38 @@ function applySandGravity() {
             for (let p = 0; p < currentRow.length; p++) {
                 if (currentRow[p] !== 0) continue; // no circle here
 
-                // Supported if below has a circle at p or p+1
-                const hasSupport =
-                    (p < belowRow.length && belowRow[p] === 0) ||
-                    (p + 1 < belowRow.length && belowRow[p + 1] === 0);
+                const leftSupport = (p < belowRow.length && belowRow[p] === 0);
+                const rightSupport = (p + 1 < belowRow.length && belowRow[p + 1] === 0);
 
-                if (hasSupport) continue;
+                // Fully supported — both sides hold it up
+                if (leftSupport && rightSupport) continue;
 
-                // Unsupported — find where it can land
+                // Has at least one support — falls to the unsupported side
+                // No support at all — falls to whichever side is open
                 const leftOpen = (p < belowRow.length && belowRow[p] === 1);
                 const rightOpen = (p + 1 < belowRow.length && belowRow[p + 1] === 1);
 
                 let landPos = -1;
-                if (leftOpen && rightOpen) {
-                    landPos = Math.random() < 0.5 ? p : p + 1;
-                } else if (leftOpen) {
-                    landPos = p;
-                } else if (rightOpen) {
-                    landPos = p + 1;
+                if (leftSupport && !rightSupport) {
+                    // Supported on left only → falls right
+                    if (rightOpen) landPos = p + 1;
+                } else if (rightSupport && !leftSupport) {
+                    // Supported on right only → falls left
+                    if (leftOpen) landPos = p;
+                } else {
+                    // No support at all — pick an open side
+                    if (leftOpen && rightOpen) {
+                        landPos = Math.random() < 0.5 ? p : p + 1;
+                    } else if (leftOpen) {
+                        landPos = p;
+                    } else if (rightOpen) {
+                        landPos = p + 1;
+                    }
                 }
 
                 if (landPos >= 0) {
-                    currentRow[p] = 1;        // circle leaves
-                    belowRow[landPos] = 0;    // circle lands
+                    currentRow[p] = 1;
+                    belowRow[landPos] = 0;
                     changed = true;
                 }
             }
@@ -2014,10 +2034,8 @@ function applyUnlock(option, checkbox, eligible) {
 }
 
 async function refreshUnlocks() {
-    const singleName = (document.getElementById('singlePlayerName')?.value || '').trim();
-    const multiName = (document.getElementById('multiPlayerName')?.value || '').trim();
-
-    if (!singleName && !multiName) return;
+    const name = currentUser ? currentUser.username : '';
+    if (!name) return;
 
     try {
         const res = await fetch('/scoreboard');
@@ -2036,41 +2054,37 @@ async function refreshUnlocks() {
             return total;
         }
 
-        if (singleName) {
-            const wins = getPlayerWins(singleName);
-            gameState.playerLevel = wins;
+        const wins = getPlayerWins(name);
+        gameState.playerLevel = wins;
 
-            applyUnlock(document.getElementById('doublesModeOption'), document.getElementById('doublesModeCheckbox'), wins >= 3);
-            applyUnlock(document.getElementById('diceModeOption'), document.getElementById('diceModeCheckbox'), wins >= 6);
-            applyUnlock(document.getElementById('armourModeOption'), document.getElementById('armourModeCheckbox'), wins >= 10);
-            applyUnlock(document.getElementById('portalModeOption'), document.getElementById('portalModeCheckbox'), wins >= 12);
-            applyUnlock(document.getElementById('sandModeOption'), document.getElementById('sandModeCheckbox'), wins >= 15);
-            applyUnlock(document.getElementById('cascadeModeOption'), document.getElementById('cascadeModeCheckbox'), wins >= 20);
+        applyUnlock(document.getElementById('doublesModeOption'), document.getElementById('doublesModeCheckbox'), wins >= 3);
+        applyUnlock(document.getElementById('diceModeOption'), document.getElementById('diceModeCheckbox'), wins >= 6);
+        applyUnlock(document.getElementById('armourModeOption'), document.getElementById('armourModeCheckbox'), wins >= 10);
+        applyUnlock(document.getElementById('portalModeOption'), document.getElementById('portalModeCheckbox'), wins >= 12);
+        applyUnlock(document.getElementById('sandModeOption'), document.getElementById('sandModeCheckbox'), wins >= 15);
+        applyUnlock(document.getElementById('cascadeModeOption'), document.getElementById('cascadeModeCheckbox'), wins >= 20);
 
-            // Local mode uses the same unlock thresholds
-            applyUnlock(document.getElementById('localDoublesModeOption'), document.getElementById('localDoublesModeCheckbox'), wins >= 3);
-            applyUnlock(document.getElementById('localDiceModeOption'), document.getElementById('localDiceModeCheckbox'), wins >= 6);
-            applyUnlock(document.getElementById('localArmourModeOption'), document.getElementById('localArmourModeCheckbox'), wins >= 10);
-            applyUnlock(document.getElementById('localPortalModeOption'), document.getElementById('localPortalModeCheckbox'), wins >= 12);
-            applyUnlock(document.getElementById('localSandModeOption'), document.getElementById('localSandModeCheckbox'), wins >= 15);
-            applyUnlock(document.getElementById('localCascadeModeOption'), document.getElementById('localCascadeModeCheckbox'), wins >= 20);
+        // Local mode uses the same unlock thresholds
+        applyUnlock(document.getElementById('localDoublesModeOption'), document.getElementById('localDoublesModeCheckbox'), wins >= 3);
+        applyUnlock(document.getElementById('localDiceModeOption'), document.getElementById('localDiceModeCheckbox'), wins >= 6);
+        applyUnlock(document.getElementById('localArmourModeOption'), document.getElementById('localArmourModeCheckbox'), wins >= 10);
+        applyUnlock(document.getElementById('localPortalModeOption'), document.getElementById('localPortalModeCheckbox'), wins >= 12);
+        applyUnlock(document.getElementById('localSandModeOption'), document.getElementById('localSandModeCheckbox'), wins >= 15);
+        applyUnlock(document.getElementById('localCascadeModeOption'), document.getElementById('localCascadeModeCheckbox'), wins >= 20);
 
-            // Custom map editor unlock
-            const customEl = document.getElementById('customMapOption');
-            if (customEl) {
-                if (wins >= 5) customEl.classList.remove('hidden');
-                else customEl.classList.add('hidden');
-            }
-        }
+        // Multiplayer mode unlocks
+        applyUnlock(document.getElementById('multiDoublesModeOption'), document.getElementById('multiDoublesModeCheckbox'), wins >= 3);
+        applyUnlock(document.getElementById('multiDiceModeOption'), document.getElementById('multiDiceModeCheckbox'), wins >= 6);
+        applyUnlock(document.getElementById('multiArmourModeOption'), document.getElementById('multiArmourModeCheckbox'), wins >= 10);
+        applyUnlock(document.getElementById('multiPortalModeOption'), document.getElementById('multiPortalModeCheckbox'), wins >= 12);
+        applyUnlock(document.getElementById('multiSandModeOption'), document.getElementById('multiSandModeCheckbox'), wins >= 15);
+        applyUnlock(document.getElementById('multiCascadeModeOption'), document.getElementById('multiCascadeModeCheckbox'), wins >= 20);
 
-        if (multiName) {
-            const totalWins = getPlayerWins(multiName);
-            applyUnlock(document.getElementById('multiDoublesModeOption'), document.getElementById('multiDoublesModeCheckbox'), totalWins >= 3);
-            applyUnlock(document.getElementById('multiDiceModeOption'), document.getElementById('multiDiceModeCheckbox'), totalWins >= 6);
-            applyUnlock(document.getElementById('multiArmourModeOption'), document.getElementById('multiArmourModeCheckbox'), totalWins >= 10);
-            applyUnlock(document.getElementById('multiPortalModeOption'), document.getElementById('multiPortalModeCheckbox'), totalWins >= 12);
-            applyUnlock(document.getElementById('multiSandModeOption'), document.getElementById('multiSandModeCheckbox'), totalWins >= 15);
-            applyUnlock(document.getElementById('multiCascadeModeOption'), document.getElementById('multiCascadeModeCheckbox'), totalWins >= 20);
+        // Custom map editor unlock
+        const customEl = document.getElementById('customMapOption');
+        if (customEl) {
+            if (wins >= 5) customEl.classList.remove('hidden');
+            else customEl.classList.add('hidden');
         }
 
     } catch (e) {
@@ -2252,6 +2266,32 @@ const TUTORIALS = {
                 map: null,
                 validate: null,
                 successMsg: "You beat the AI! You're ready. 🎉"
+            }
+        ]
+    },
+    menu: {
+        title: '🧭 Menu Guide',
+        unlockWins: 0,
+        steps: [
+            {
+                title: 'Game Modes',
+                desc: 'The main menu has <strong>3 tabs</strong> at the top:<br>• <strong>Play vs Computer</strong> — single player against AI (Easy, Medium, Hard)<br>• <strong>2 Players (One Device)</strong> — take turns with a friend on the same screen<br>• <strong>Play Online</strong> — create or join a game with a 3-digit code',
+            },
+            {
+                title: 'Single Player Options',
+                desc: '<strong>Difficulty</strong> controls how smart the AI is. <strong>Who starts first</strong> lets you pick turn order. <strong>Timer</strong> adds a countdown — if it runs out, a move is made for you. <strong>Map</strong> changes the board layout.',
+            },
+            {
+                title: 'Unlockable Modes',
+                desc: 'As you win games, you unlock special modes:<br>• 🎯 <strong>Doubles</strong> (3 wins) — take exactly 2 to go again<br>• 🎲 <strong>Dice</strong> (6 wins) — random cap on how many you can take<br>• 🔴 <strong>Armour</strong> (10 wins) — some circles need 2 hits<br>• 🌀 <strong>Portals</strong> (12 wins) — linked pairs + kill circles<br>• 🏜️ <strong>Sand</strong> (15 wins) — circles fall when unsupported<br>• ⚡ <strong>Cascade</strong> (20 wins) — column removal chain reaction',
+            },
+            {
+                title: 'The Sidebar',
+                desc: 'On the right side you\'ll find:<br>• 🏆 <strong>Scoreboard</strong> — leaderboards for single & multiplayer<br>• 🏅 <strong>Achievements</strong> — track your milestones<br>• 📖 <strong>Tutorial</strong> — you\'re here! Come back anytime<br>• 📝 <strong>Credits</strong> — who made this game<br>• 🎨 <strong>Theme Code</strong> — enter codes to change the background<br>• 🚪 <strong>Logout</strong> — switch accounts',
+            },
+            {
+                title: 'You\'re all set!',
+                desc: 'That\'s the full menu. Go play some games, unlock modes, and climb the scoreboard. Good luck!',
             }
         ]
     },
@@ -2809,16 +2849,21 @@ function applyTutorialSandGravity(miniRows) {
             const belowRow = miniRows[belowR];
             for (let p = 0; p < currentRow.length; p++) {
                 if (currentRow[p] !== 0) continue;
-                const hasSupport =
-                    (p < belowRow.length && belowRow[p] === 0) ||
-                    (p + 1 < belowRow.length && belowRow[p + 1] === 0);
-                if (hasSupport) continue;
+                const leftSupport = (p < belowRow.length && belowRow[p] === 0);
+                const rightSupport = (p + 1 < belowRow.length && belowRow[p + 1] === 0);
+                if (leftSupport && rightSupport) continue;
                 const leftOpen = (p < belowRow.length && belowRow[p] === 1);
                 const rightOpen = (p + 1 < belowRow.length && belowRow[p + 1] === 1);
                 let landPos = -1;
-                if (leftOpen && rightOpen) landPos = Math.random() < 0.5 ? p : p + 1;
-                else if (leftOpen) landPos = p;
-                else if (rightOpen) landPos = p + 1;
+                if (leftSupport && !rightSupport) {
+                    if (rightOpen) landPos = p + 1;
+                } else if (rightSupport && !leftSupport) {
+                    if (leftOpen) landPos = p;
+                } else {
+                    if (leftOpen && rightOpen) landPos = Math.random() < 0.5 ? p : p + 1;
+                    else if (leftOpen) landPos = p;
+                    else if (rightOpen) landPos = p + 1;
+                }
                 if (landPos >= 0) {
                     currentRow[p] = 1;
                     belowRow[landPos] = 0;
@@ -2869,10 +2914,12 @@ function advanceTutorial() {
     if (tutorialStep >= tut.steps.length) {
         // Section complete
         if (currentTutorialId === 'basics') {
+            // Chain into the menu guide tutorial
+            startTutorialSection('menu');
+        } else if (currentTutorialId === 'menu') {
             document.getElementById('tutorialScreen').classList.add('hidden');
             document.getElementById('mainMenuScreen').classList.remove('hidden');
             tutorialActive = false;
-            alert("Tutorial complete! You're ready to play. 🎉");
         } else {
             // Return to tutorial menu
             renderTutorialMenu();
@@ -2894,13 +2941,8 @@ function onTutorialWin() {
     document.getElementById('gameScreen').classList.add('hidden');
     document.getElementById('tutorialScreen').classList.remove('hidden');
     document.getElementById('mainMenuBtn').onclick = returnToMainMenu;
-    tutorialStep = TUTORIALS.basics.steps.length;
-    renderTutorialMenu();
-    setTimeout(() => {
-        document.getElementById('tutorialScreen').classList.add('hidden');
-        document.getElementById('mainMenuScreen').classList.remove('hidden');
-        alert("Tutorial complete! You're ready to play. 🎉");
-    }, 1500);
+    // Chain into the menu guide tutorial
+    startTutorialSection('menu');
 }
 // ============ ACHIEVEMENTS ============
 const ACHIEVEMENT_DEFS = [
@@ -3383,6 +3425,77 @@ function secretTitleClick() {
     }
 }
 
+// ============ ADMIN PANEL ============
+function showAdminPanel() {
+    if (!currentUser || currentUser.username.toLowerCase() !== 'vip') return;
+    document.getElementById('adminModal').classList.add('show');
+    document.getElementById('adminPasswordInput').value = '';
+    document.getElementById('adminTargetName').value = '';
+    document.getElementById('adminError').textContent = '';
+}
+
+function closeAdminPanel() {
+    document.getElementById('adminModal').classList.remove('show');
+}
+
+async function adminResetPassword() {
+    const adminPassword = document.getElementById('adminPasswordInput').value;
+    const targetName = document.getElementById('adminTargetName').value.trim();
+    const errorEl = document.getElementById('adminError');
+
+    if (!adminPassword) { errorEl.textContent = 'Enter admin password.'; return; }
+    if (!targetName) { errorEl.textContent = 'Enter target username.'; return; }
+
+    try {
+        const res = await fetch('/admin/delete-password', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ adminPassword, targetName })
+        });
+        const data = await res.json();
+        if (res.ok && data.ok) {
+            errorEl.style.color = '#27ae60';
+            errorEl.textContent = `Password deleted for "${targetName}". They can set a new one on next login.`;
+        } else {
+            errorEl.style.color = '#e74c3c';
+            errorEl.textContent = data.error || 'Failed.';
+        }
+    } catch (e) {
+        errorEl.style.color = '#e74c3c';
+        errorEl.textContent = 'Connection error.';
+    }
+}
+
+async function adminDeleteUser() {
+    const adminPassword = document.getElementById('adminPasswordInput').value;
+    const targetName = document.getElementById('adminTargetName').value.trim();
+    const errorEl = document.getElementById('adminError');
+
+    if (!adminPassword) { errorEl.textContent = 'Enter admin password.'; return; }
+    if (!targetName) { errorEl.textContent = 'Enter target username.'; return; }
+
+    if (!confirm(`Are you sure you want to DELETE "${targetName}" and all their leaderboard entries? This cannot be undone.`)) return;
+
+    try {
+        const res = await fetch('/admin/delete-user', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ adminPassword, targetName })
+        });
+        const data = await res.json();
+        if (res.ok && data.ok) {
+            errorEl.style.color = '#27ae60';
+            errorEl.textContent = `User "${targetName}" fully deleted (password, achievements, scores).`;
+        } else {
+            errorEl.style.color = '#e74c3c';
+            errorEl.textContent = data.error || 'Failed.';
+        }
+    } catch (e) {
+        errorEl.style.color = '#e74c3c';
+        errorEl.textContent = 'Connection error.';
+    }
+}
+
 window.onload = () => {
     // Initialize authentication first
     initializeAuth();
@@ -3396,56 +3509,8 @@ window.onload = () => {
     const difficultyRadio = document.querySelector('input[name="difficulty"][value="medium"]');
     if (difficultyRadio) difficultyRadio.checked = true;
 
-    const savedSingleName = localStorage.getItem('singlePlayerName');
-    if (savedSingleName) {
-        document.getElementById('singlePlayerName').value = savedSingleName;
-        // Pre-load achievements so the scoreboard tab works immediately
-        loadAchievements(savedSingleName);
-        gameState.playerName = savedSingleName;
-    }
-
-    const savedMultiName = localStorage.getItem('multiPlayerName');
-    if (savedMultiName) document.getElementById('multiPlayerName').value = savedMultiName;
-
-    const savedLocal1 = localStorage.getItem('localPlayer1Name');
-    if (savedLocal1) document.getElementById('localPlayer1Name').value = savedLocal1;
     const savedLocal2 = localStorage.getItem('localPlayer2Name');
     if (savedLocal2) document.getElementById('localPlayer2Name').value = savedLocal2;
-
-    let unlockTimer = null;
-    const debouncedRefresh = () => {
-        clearTimeout(unlockTimer);
-        unlockTimer = setTimeout(refreshUnlocks, 300);
-    };
-
-    // Auth on blur — fires when user tabs/clicks away from the name field
-    let authTimer = {};
-    function attachAuthBlur(inputId, triggerUnlocks) {
-        const el = document.getElementById(inputId);
-        if (!el) return;
-        if (triggerUnlocks) el.addEventListener('input', debouncedRefresh);
-        el.addEventListener('blur', () => {
-            const name = el.value.trim();
-            if (!name) return;
-            clearTimeout(authTimer[inputId]);
-            authTimer[inputId] = setTimeout(async () => {
-                if (document.getElementById('passwordModal').classList.contains('show')) return;
-                const res = await fetch(`/password/exists?name=${encodeURIComponent(name)}`).catch(() => null);
-                if (!res) return;
-                const data = await res.json();
-                if (data.exists) {
-                    const ok = await openPasswordModal(name, 'verify');
-                    if (!ok) el.value = '';
-                }
-            }, 300);
-        });
-    }
-
-    attachAuthBlur('singlePlayerName', true);
-    attachAuthBlur('multiPlayerName', true);
-    attachAuthBlur('localPlayer1Name', false);
-    attachAuthBlur('localPlayer2Name', false);
-    attachAuthBlur('joinPlayerName', false);
 
     refreshUnlocks();
 };
