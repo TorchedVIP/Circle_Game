@@ -1,0 +1,477 @@
+import asyncio
+import aiohttp
+from aiohttp import web
+import json
+import random
+import os
+import hashlib
+
+games = {}
+
+SCOREBOARD_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'scoreboard.json')
+
+MAPS = {
+    'classic': [1, 2, 3, 4, 5],
+    'diamond': [3, 2, 1, 2, 3],
+    'short':   [3, 4, 5],
+    'spread':  [5, 3, 1],
+    'chaos':   [2, 3, 4, 5],
+    'bridges': [[1, 1, 0, 1, 1], [1, 0, 1], [1, 1, 0, 1, 1]],
+    'hexagonal': [[1,1,1],[1,1,0,1,1],[1,1,0,0,1,1],[1,1,0,1,1],[1,1,1]],
+    'gigantic': [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+}
+
+
+def roll_dice_for(rows):
+    return random.randint(1, 5)
+
+
+def make_rows(map_name='classic'):
+    if map_name == 'random':
+        map_name = random.choice(list(MAPS.keys()))
+    entries = MAPS.get(map_name, MAPS['classic'])
+    rows = {}
+    for i, entry in enumerate(entries):
+        if isinstance(entry, list):
+            rows[str(i + 1)] = [0 if v == 1 else 1 for v in entry]
+        else:
+            rows[str(i + 1)] = [0] * entry
+    return rows
+
+
+def load_scoreboard():
+    if not os.path.exists(SCOREBOARD_FILE):
+        template = os.path.join(os.path.dirname(SCOREBOARD_FILE), 'scoreboard.template.json')
+        if os.path.exists(template):
+            import shutil
+            shutil.copy(template, SCOREBOARD_FILE)
+        else:
+            return {
+                'singlePlayer': {'easy': [], 'medium': [], 'hard': []},
+                'multiplayer': [],
+                'passwords': {},
+                'achievements': {},
+                'users': {}
+            }
+    with open(SCOREBOARD_FILE, 'r') as f:
+        data = json.load(f)
+    if 'passwords' not in data:
+        data['passwords'] = {}
+    if 'achievements' not in data:
+        data['achievements'] = {}
+    if 'users' not in data:
+        data['users'] = {}
+    return data
+
+
+def save_scoreboard(data):
+    with open(SCOREBOARD_FILE, 'w') as f:
+        json.dump(data, f, indent=2)
+
+
+def hash_password(pw_sequence):
+    """pw_sequence is a list of ints e.g. [1,3,2,5]. Hash it for storage."""
+    raw = ','.join(str(x) for x in pw_sequence)
+    return hashlib.sha256(raw.encode()).hexdigest()
+
+
+def hash_user_password(password):
+    """Hash a regular text password for user auth."""
+    return hashlib.sha256(password.encode()).hexdigest()
+
+
+# ── User Authentication Endpoints ──────────────────────────────────────────
+
+async def register_user(request):
+    """POST /api/auth/register — body {username, password}"""
+    try:
+        data = await request.json()
+    except Exception:
+        return web.json_response({'error': 'Invalid JSON'}, status=400)
+    
+    username = str(data.get('username', '')).strip()[:20]
+    password = str(data.get('password', '')).strip()
+    
+    if not username or not password:
+        return web.json_response({'error': 'Username and password required'}, status=400)
+    
+    if len(username) < 3:
+        return web.json_response({'error': 'Username must be at least 3 characters'}, status=400)
+    
+    # Allow short password strings (triangle-patterns may be short sequences)
+    if len(password) < 1:
+        return web.json_response({'error': 'Password must be provided'}, status=400)
+    
+    board = load_scoreboard()
+    username_lower = username.lower()
+    
+    # Check if user already exists
+    if username_lower in board.get('users', {}):
+        return web.json_response({'error': 'Username already taken'}, status=400)
+    
+    # Create new user
+    board['users'][username_lower] = {
+        'displayName': username,
+        'passwordHash': hash_user_password(password)
+    }
+    save_scoreboard(board)
+    
+    return web.json_response({'ok': True})
+
+
+async def login_user(request):
+    """POST /api/auth/login — body {username, password}"""
+    try:
+        data = await request.json()
+    except Exception:
+        return web.json_response({'error': 'Invalid JSON'}, status=400)
+    
+    username = str(data.get('username', '')).strip()[:20]
+    password = str(data.get('password', '')).strip()
+    
+    if not username or not password:
+        return web.json_response({'error': 'Username and password required'}, status=400)
+    
+    board = load_scoreboard()
+    username_lower = username.lower()
+    user = board.get('users', {}).get(username_lower)
+    
+    if not user:
+        return web.json_response({'error': 'Invalid username or password'}, status=400)
+    
+    if user['passwordHash'] != hash_user_password(password):
+        return web.json_response({'error': 'Invalid username or password'}, status=400)
+    
+    # Return success with display name
+    return web.json_response({'ok': True, 'displayName': user.get('displayName', username)})
+
+
+# ── Legacy Password endpoints ──────────────────────────────────────────────────────
+
+async def check_password_exists(request):
+    """GET /password/exists?name=X — returns {exists: bool}"""
+    name = request.rel_url.query.get('name', '').strip().lower()
+    if not name:
+        return web.json_response({'error': 'Name required'}, status=400)
+    board = load_scoreboard()
+    exists = name in board.get('passwords', {})
+    return web.json_response({'exists': exists})
+
+
+async def set_password(request):
+    """POST /password/set — body {name, sequence:[int,...]}. Only sets if no password exists yet."""
+    try:
+        data = await request.json()
+    except Exception:
+        return web.json_response({'error': 'Invalid JSON'}, status=400)
+    name = str(data.get('name', '')).strip()[:20].lower()
+    sequence = data.get('sequence', [])
+    if not name or not sequence or len(sequence) < 1:
+        return web.json_response({'error': 'Name and sequence required'}, status=400)
+    board = load_scoreboard()
+    if name in board['passwords']:
+        return web.json_response({'error': 'Account already exists'}, status=409)
+    board['passwords'][name] = hash_password(sequence)
+    save_scoreboard(board)
+    return web.json_response({'ok': True})
+
+
+async def verify_password(request):
+    """POST /password/verify — body {name, sequence:[int,...]}"""
+    try:
+        data = await request.json()
+    except Exception:
+        return web.json_response({'error': 'Invalid JSON'}, status=400)
+    name = str(data.get('name', '')).strip()[:20].lower()
+    sequence = data.get('sequence', [])
+    board = load_scoreboard()
+    stored = board.get('passwords', {}).get(name)
+    if stored is None:
+        return web.json_response({'ok': True, 'new': True})  # no password set yet
+    match = hash_password(sequence) == stored
+    return web.json_response({'ok': match, 'new': False})
+
+
+# ── Achievement endpoints ───────────────────────────────────────────────────
+
+async def get_achievements(request):
+    """GET /achievements?name=X"""
+    name = request.rel_url.query.get('name', '').strip().lower()
+    if not name:
+        return web.json_response({'error': 'Name required'}, status=400)
+    board = load_scoreboard()
+    achieved = board.get('achievements', {}).get(name, [])
+    return web.json_response({'achievements': achieved})
+
+
+async def unlock_achievement(request):
+    """POST /achievements/unlock — body {name, achievement}"""
+    try:
+        data = await request.json()
+    except Exception:
+        return web.json_response({'error': 'Invalid JSON'}, status=400)
+    name = str(data.get('name', '')).strip()[:20].lower()
+    achievement = str(data.get('achievement', '')).strip()
+    if not name or not achievement:
+        return web.json_response({'error': 'Name and achievement required'}, status=400)
+    board = load_scoreboard()
+    if name not in board['achievements']:
+        board['achievements'][name] = []
+    if achievement not in board['achievements'][name]:
+        board['achievements'][name].append(achievement)
+        save_scoreboard(board)
+        return web.json_response({'ok': True, 'unlocked': True})
+    return web.json_response({'ok': True, 'unlocked': False})
+
+
+# ── Scoreboard Endpoints ────────────────────────────────────────────────
+
+async def get_scoreboard(request):
+    board = load_scoreboard()
+    # Don't expose raw passwords or user hashes
+    safe = {k: v for k, v in board.items() if k not in ('passwords', 'users')}
+    return web.json_response(safe)
+
+
+async def post_single_score(request):
+    try:
+        data = await request.json()
+    except Exception:
+        return web.json_response({'error': 'Invalid JSON'}, status=400)
+
+    name = str(data.get('name', '')).strip()[:20]
+    if not name:
+        return web.json_response({'error': 'Name required'}, status=400)
+    difficulty = data.get('difficulty', 'medium')
+    if difficulty not in ('easy', 'medium', 'hard'):
+        return web.json_response({'error': 'Invalid difficulty'}, status=400)
+
+    board = load_scoreboard()
+    entries = board['singlePlayer'][difficulty]
+    existing = next((e for e in entries if e['name'].lower() == name.lower()), None)
+    if existing:
+        existing['wins'] += 1
+    else:
+        entries.append({'name': name, 'wins': 1})
+    entries.sort(key=lambda e: e['wins'], reverse=True)
+    save_scoreboard(board)
+    return web.json_response({'ok': True})
+
+
+async def post_multi_score(request):
+    try:
+        data = await request.json()
+    except Exception:
+        return web.json_response({'error': 'Invalid JSON'}, status=400)
+
+    name = str(data.get('name', '')).strip()[:20]
+    if not name:
+        return web.json_response({'error': 'Name required'}, status=400)
+    won = bool(data.get('won', False))
+    duration = int(data.get('duration', 0))
+
+    board = load_scoreboard()
+    existing = next((e for e in board['multiplayer'] if e['name'].lower() == name.lower()), None)
+    if existing:
+        if won:
+            existing['wins'] += 1
+        existing['gamesPlayed'] += 1
+        if existing['fastestTime'] is None or duration < existing['fastestTime']:
+            existing['fastestTime'] = duration
+    else:
+        board['multiplayer'].append({
+            'name': name,
+            'wins': 1 if won else 0,
+            'gamesPlayed': 1,
+            'fastestTime': duration
+        })
+    board['multiplayer'].sort(key=lambda e: e['wins'], reverse=True)
+    save_scoreboard(board)
+    return web.json_response({'ok': True})
+
+
+# ── WebSocket Handler ──────────────────────────────────────────────────
+
+async def websocket_handler(request):
+    ws = web.WebSocketResponse()
+    await ws.prepare(request)
+
+    player_game = None
+    player_num = None
+
+    async for msg in ws:
+        if msg.type == aiohttp.WSMsgType.TEXT:
+            try:
+                data = json.loads(msg.data)
+            except Exception:
+                continue
+
+            action = data.get('action')
+
+            if action == 'create_game':
+                code = str(random.randint(0, 999)).zfill(3)
+                attempts = 0
+                while code in games and attempts < 100:
+                    code = str(random.randint(0, 999)).zfill(3)
+                    attempts += 1
+
+                starting_player = random.randint(0, 1)
+                map_name = data.get('map', 'classic')
+                if map_name != 'random' and map_name not in MAPS:
+                    map_name = 'classic'
+                dice_mode = bool(data.get('diceMode', False))
+                doubles_mode = bool(data.get('doublesMode', False))
+                armour_mode = bool(data.get('armourMode', False))
+                sand_mode = bool(data.get('sandMode', False))
+                cascade_mode = bool(data.get('cascadeMode', False))
+                portal_mode = bool(data.get('portalMode', False))
+                rows = make_rows(map_name)
+                games[code] = {
+                    'players': [ws, None],
+                    'rows': rows,
+                    'currentTurn': starting_player,
+                    'gameActive': True,
+                    'diceMode': dice_mode,
+                    'diceCap': roll_dice_for(rows) if dice_mode else 0,
+                    'doublesMode': doubles_mode,
+                    'armourMode': armour_mode,
+                    'sandMode': sand_mode,
+                    'cascadeMode': cascade_mode,
+                    'portalMode': portal_mode,
+                }
+                player_game = code
+                player_num = 0
+
+                await ws.send_json({
+                    'type': 'game_created',
+                    'code': code,
+                    'playerNum': 0,
+                    'startingPlayer': starting_player
+                })
+
+            elif action == 'join_game':
+                code = data.get('code', '')
+                if code not in games:
+                    await ws.send_json({'type': 'error', 'message': 'Game not found'})
+                elif games[code]['players'][1] is not None:
+                    await ws.send_json({'type': 'error', 'message': 'Game is already full'})
+                else:
+                    games[code]['players'][1] = ws
+                    player_game = code
+                    player_num = 1
+
+                    game = games[code]
+                    state = {
+                        'type': 'game_started',
+                        'rows': game['rows'],
+                        'currentTurn': game['currentTurn'],
+                        'gameActive': True,
+                        'diceMode': game.get('diceMode', False),
+                        'diceCap': game.get('diceCap', 0),
+                        'doublesMode': game.get('doublesMode', False),
+                        'armourMode': game.get('armourMode', False),
+                        'portalMode': game.get('portalMode', False),
+                        'sandMode': game.get('sandMode', False),
+                        'cascadeMode': game.get('cascadeMode', False),
+                    }
+                    for i, p in enumerate(game['players']):
+                        if p and not p.closed:
+                            msg_out = dict(state)
+                            msg_out['playerNum'] = i
+                            await p.send_json(msg_out)
+
+            elif action == 'make_move':
+                code = player_game
+                if code and code in games:
+                    game = games[code]
+                    game['rows'] = data['rows']
+                    game_active = data.get('gameActive', True)
+                    game['gameActive'] = game_active
+
+                    if game_active:
+                        next_turn = 1 - player_num
+                        game['currentTurn'] = next_turn
+                    else:
+                        next_turn = game['currentTurn']
+
+                    if game.get('diceMode') and game_active:
+                        game['diceCap'] = roll_dice_for(game['rows'])
+                    elif not game_active:
+                        game['diceCap'] = 0
+
+                    state = {
+                        'type': 'game_update',
+                        'rows': game['rows'],
+                        'currentTurn': next_turn,
+                        'gameActive': game_active,
+                        'diceMode': game.get('diceMode', False),
+                        'diceCap': game.get('diceCap', 0),
+                    }
+                    for p in game['players']:
+                        if p and not p.closed:
+                            await p.send_json(state)
+
+        elif msg.type in (aiohttp.WSMsgType.ERROR, aiohttp.WSMsgType.CLOSE):
+            break
+
+    if player_game and player_game in games:
+        game = games[player_game]
+        if player_num is not None:
+            game['players'][player_num] = None
+        other_num = 1 - player_num if player_num is not None else None
+        if other_num is not None:
+            other = game['players'][other_num]
+            if other and not other.closed:
+                await other.send_json({'type': 'player_disconnected'})
+        if all(p is None or p.closed for p in game['players']):
+            del games[player_game]
+
+    return ws
+
+
+NO_CACHE_HEADERS = {
+    'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
+    'Pragma': 'no-cache',
+    'Expires': '0',
+}
+
+
+async def static_handler(request):
+    path = request.match_info.get('path', '')
+    if not path or path == '/':
+        path = 'index.html'
+    base = os.path.dirname(os.path.abspath(__file__))
+    file_path = os.path.join(base, path)
+    if os.path.isfile(file_path):
+        return web.FileResponse(file_path, headers=NO_CACHE_HEADERS)
+    return web.Response(status=404, text='Not Found')
+
+
+async def index_handler(request):
+    return web.FileResponse(
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), 'index.html'),
+        headers=NO_CACHE_HEADERS,
+    )
+
+
+app = web.Application()
+app.router.add_post('/api/auth/register', register_user)
+app.router.add_post('/api/auth/login', login_user)
+app.router.add_get('/scoreboard', get_scoreboard)
+app.router.add_post('/scoreboard/single', post_single_score)
+app.router.add_post('/scoreboard/multi', post_multi_score)
+app.router.add_get('/password/exists', check_password_exists)
+app.router.add_post('/password/set', set_password)
+app.router.add_post('/password/verify', verify_password)
+app.router.add_get('/achievements', get_achievements)
+app.router.add_post('/achievements/unlock', unlock_achievement)
+app.router.add_get('/themes', lambda r: web.FileResponse(
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), 'themes.json'),
+    headers=NO_CACHE_HEADERS))
+app.router.add_get('/ws', websocket_handler)
+app.router.add_get('/', index_handler)
+app.router.add_get('/{path:.*}', static_handler)
+
+if __name__ == '__main__':
+    web.run_app(app, host='0.0.0.0', port=5000)
+

@@ -1,0 +1,3501 @@
+// ============ AUTHENTICATION ============
+let currentUser = null; // { username: string }
+let lastPwdSequence = [];
+
+function initializeAuth() {
+    const savedUser = localStorage.getItem('circleGameUser');
+    if (savedUser) {
+        currentUser = JSON.parse(savedUser);
+        showMainMenu();
+    } else {
+        showLoginScreen();
+    }
+}
+
+function showLoginScreen() {
+    document.getElementById('loginScreen').classList.remove('hidden');
+    document.getElementById('mainMenuScreen').classList.add('hidden');
+    document.getElementById('gameScreen').classList.add('hidden');
+    document.getElementById('loggedInUser').classList.add('hidden');
+    document.getElementById('loginError').textContent = '';
+    const cont = document.querySelector('.container');
+    if (cont) cont.classList.add('login-mode');
+}
+
+function showMainMenu() {
+    document.getElementById('loginScreen').classList.add('hidden');
+    document.getElementById('mainMenuScreen').classList.remove('hidden');
+    const cont = document.querySelector('.container');
+    if (cont) cont.classList.remove('login-mode');
+    const sidebarUser = document.getElementById('sidebarUser');
+    if (currentUser) {
+        if (sidebarUser) sidebarUser.textContent = `👤 ${currentUser.username}`;
+        const sp = document.getElementById('singlePlayerName');
+        if (sp) sp.value = currentUser.username;
+        const mp = document.getElementById('multiPlayerName');
+        if (mp) mp.value = currentUser.username;
+        gameState.playerName = currentUser.username;
+        refreshUnlocks();
+        loadAchievements(currentUser.username);
+        checkWinAchievements(currentUser.username);
+        startTutorialBlink();
+    } else {
+        if (sidebarUser) sidebarUser.textContent = 'Guest';
+    }
+}
+
+async function submitLogin() {
+    const username = document.getElementById('loginUsername').value.trim();
+    const errorEl = document.getElementById('loginError');
+
+    if (!username) {
+        errorEl.textContent = 'Please enter a username';
+        return;
+    }
+
+    try {
+        // Check if this user has a password set
+        const checkRes = await fetch(`/password/exists?name=${encodeURIComponent(username)}`);
+        const checkData = await checkRes.json();
+
+        if (!checkData.exists) {
+            errorEl.textContent = 'No account found. Click Register to create one.';
+            return;
+        }
+
+        const ok = await openPasswordModal(username, 'verify');
+        if (ok) {
+            currentUser = { username };
+            localStorage.setItem('circleGameUser', JSON.stringify(currentUser));
+            document.getElementById('loginUsername').value = '';
+            errorEl.textContent = '';
+            showMainMenu();
+            loadAchievements(username);
+            checkWinAchievements(username);
+        } else {
+            errorEl.textContent = 'Login cancelled or wrong password.';
+        }
+    } catch (err) {
+        errorEl.textContent = 'Connection error. Please try again.';
+    }
+}
+
+// Alias for the "Use Triangle Password" button — same as Login
+async function triangleLogin() {
+    await submitLogin();
+}
+
+async function submitRegister() {
+    const username = document.getElementById('loginUsername').value.trim();
+    const errorEl = document.getElementById('loginError');
+
+    if (!username) {
+        errorEl.textContent = 'Please enter a username';
+        return;
+    }
+
+    if (username.length < 2) {
+        errorEl.textContent = 'Username must be at least 2 characters';
+        return;
+    }
+
+    try {
+        // Check if username already exists
+        const checkRes = await fetch(`/password/exists?name=${encodeURIComponent(username)}`);
+        const checkData = await checkRes.json();
+
+        if (checkData.exists) {
+            errorEl.textContent = 'Username already taken. Use Login instead.';
+            return;
+        }
+
+        // Open triangle modal to set password (pwdSubmit stores it server-side)
+        const ok = await openPasswordModal(username, 'set');
+        if (!ok) {
+            errorEl.textContent = 'Registration cancelled.';
+            return;
+        }
+
+        // Password was stored by pwdSubmit — we're registered
+        currentUser = { username };
+        localStorage.setItem('circleGameUser', JSON.stringify(currentUser));
+        document.getElementById('loginUsername').value = '';
+        errorEl.textContent = '';
+        showMainMenu();
+        loadAchievements(username);
+    } catch (err) {
+        errorEl.textContent = 'Connection error. Please try again.';
+    }
+}
+
+function skipLogin() {
+    // For 2-player local mode - allow playing without login
+    currentUser = null;
+    localStorage.removeItem('circleGameUser');
+    document.getElementById('loginUsername').value = '';
+    showMainMenu();
+}
+
+function logout() {
+    currentUser = null;
+    localStorage.removeItem('circleGameUser');
+    gameState.playerNum = null;
+    gameState.currentTurn = null;
+    gameState.gameStartTime = null;
+    document.getElementById('gameScreen').classList.add('hidden');
+    document.getElementById('mainMenuScreen').classList.add('hidden');
+    document.getElementById('loginScreen').classList.remove('hidden');
+    document.getElementById('loginError').textContent = '';
+    document.getElementById('loginUsername').value = '';
+    const cont = document.querySelector('.container');
+    if (cont) cont.classList.add('login-mode');
+}
+
+// ============ GAME STATE ============
+const MAPS = {
+    classic: [1, 2, 3, 4, 5],
+    diamond: [3, 2, 1, 2, 3],
+    short:   [3, 4, 5],
+    spread:  [5, 3, 1],
+    chaos:   [2, 3, 4, 5],
+    bridges: [[1, 1, 0, 1, 1], [1, 0, 1], [1, 1, 0, 1, 1]],
+    hexagonal: [[1,1,1],[1,1,0,1,1],[1,1,0,0,1,1],[1,1,0,1,1],[1,1,1]],
+    gigantic: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+};
+
+function pickRandomMapName() {
+    const names = Object.keys(MAPS);
+    return names[Math.floor(Math.random() * names.length)];
+}
+
+function buildRows(mapName) {
+    if (mapName === 'random') {
+        mapName = pickRandomMapName();
+    }
+    const entries = MAPS[mapName] || MAPS.classic;
+    const rows = {};
+    entries.forEach((entry, i) => {
+        if (Array.isArray(entry)) {
+            // Pattern: 1 = circle present, 0 = hole (already removed)
+            rows[i + 1] = entry.map(v => v === 0 ? 1 : 0);
+        } else {
+            rows[i + 1] = new Array(entry).fill(0);
+        }
+    });
+    return rows;
+}
+
+let gameMode = 'single'; // 'single' | 'local' | 'multi'
+let gameState = {
+    rows: buildRows('classic'),
+    selected: {},
+    isPlayerTurn: true,
+    difficulty: 'medium',
+    gameOver: false,
+    playerNum: null,
+    currentTurn: null,
+    ws: null,
+    turnOrder: 'player-first',
+    playerName: 'Player',
+    player2Name: 'Player 2',
+    map: 'classic',
+    resultRecorded: false,
+    gameStartTime: null,
+    diceMode: false,
+    diceCap: 0,
+    forcedMode: false,
+    playerLevel: 0,
+    localTurn: 1,
+    // Armoured Circles mode: tracks which circles have 2 hits remaining
+    // key = "row-pos", value = hits remaining (2 = armoured, 1 = damaged)
+    armourMode: false,
+    armour: {},
+    // Cascade mode
+    cascadeMode: false,
+    // pending cascade: { row, leftPos, rightPos } — waiting for player to pick side
+    pendingCascade: null,
+    // Doubles mode: taking exactly 2 circles keeps your turn
+    doublesMode: false,
+    doublesActive: false,  // true when the current turn is a bonus doubles turn
+    // Sand mode: circles collapse downward after removal
+    sandMode: false,
+    // Portal mode: linked circle pairs + kill circles
+    portalMode: false,
+    portals: [],      // array of {a: "row-pos", b: "row-pos"} pairs
+    killCircles: [],  // array of "row-pos" keys
+    // Slayer tracking: consecutive turns taking from row 6
+    slayerStreak: 0,
+    // Timer
+    timerSeconds: 0,
+    timerInterval: null,
+    timerRemaining: 0,
+    // Secret mirror mode — every player move is mirrored by the computer on the opposite side
+    mirrorMode: false
+};
+
+// ============ DICE MODE ============
+function rollDice() {
+    if (!gameState.diceMode) return;
+    gameState.diceCap = 1 + Math.floor(Math.random() * 5); // always 1–5
+    updateDiceDisplay();
+}
+
+function updateDiceDisplay() {
+    const el = document.getElementById('diceDisplay');
+    if (!el) return;
+    if (gameState.diceMode && gameState.diceCap > 0 && !gameState.gameOver) {
+        el.classList.remove('hidden');
+        el.textContent = `🎲 Max take this turn: ${gameState.diceCap}`;
+    } else {
+        el.classList.add('hidden');
+    }
+}
+
+// ============ TIMER ============
+function startTurnTimer() {
+    clearTurnTimer();
+    if (!gameState.timerSeconds || gameState.timerSeconds <= 0) return;
+    if (!gameState.isPlayerTurn) return;
+    if (gameState.gameOver) return;
+    if (gameMode !== 'single') return; // timer only in single-player for now
+
+    gameState.timerRemaining = gameState.timerSeconds;
+    updateTimerDisplay();
+
+    gameState.timerInterval = setInterval(() => {
+        gameState.timerRemaining--;
+        updateTimerDisplay();
+        if (gameState.timerRemaining <= 0) {
+            clearTurnTimer();
+            autoMoveForPlayer();
+        }
+    }, 1000);
+}
+
+function clearTurnTimer() {
+    if (gameState.timerInterval) {
+        clearInterval(gameState.timerInterval);
+        gameState.timerInterval = null;
+    }
+    const el = document.getElementById('timerDisplay');
+    if (el) el.classList.add('hidden');
+}
+
+function updateTimerDisplay() {
+    const el = document.getElementById('timerDisplay');
+    if (!el) return;
+    if (gameState.timerSeconds > 0 && gameState.isPlayerTurn && !gameState.gameOver) {
+        el.classList.remove('hidden');
+        el.textContent = `⏱️ ${gameState.timerRemaining}s`;
+        el.style.borderColor = gameState.timerRemaining <= 3 ? '#e74c3c' : '#f39c12';
+        el.style.color = gameState.timerRemaining <= 3 ? '#c0392b' : '#e67e22';
+    } else {
+        el.classList.add('hidden');
+    }
+}
+
+function autoMoveForPlayer() {
+    // Timer ran out — make a move that keeps XOR != 0 for the opponent
+    // Unless that would leave only singles, then pass (take 1 random)
+    if (gameState.gameOver || !gameState.isPlayerTurn) return;
+
+    const legalMoves = getAllLegalMoves();
+    if (legalMoves.length === 0) return;
+
+    // Try to find a move that does NOT put opponent in a losing position
+    // (i.e., keep nim-sum non-zero for opponent = bad for us = "penalty" move)
+    let penaltyMove = null;
+    for (const move of legalMoves) {
+        const savedRows = JSON.parse(JSON.stringify(gameState.rows));
+        const savedArmour = JSON.parse(JSON.stringify(gameState.armour));
+        simulateMove(move.row, move.positions);
+        const nimSum = computeNimSum(gameState.rows);
+        const allSingles = isAllSinglesFromRows(gameState.rows);
+        gameState.rows = savedRows;
+        gameState.armour = savedArmour;
+
+        // We want nim-sum != 0 for opponent (bad for us, good penalty)
+        // But if it would leave only singles, just take 1 random instead
+        if (nimSum !== 0 && !allSingles) {
+            penaltyMove = move;
+            break;
+        }
+    }
+
+    // Fallback: just take 1 circle from the first available spot
+    if (!penaltyMove) {
+        penaltyMove = legalMoves.find(m => m.positions.length === 1) || legalMoves[0];
+    }
+
+    // Execute the move
+    gameState.selected = {};
+    const row = penaltyMove.row;
+    const positions = penaltyMove.positions;
+    for (const p of positions) {
+        gameState.selected[`${row}-${p}`] = true;
+    }
+    submitMove();
+}
+
+function computeNimSum(rows) {
+    let nimSum = 0;
+    for (const row of Object.keys(rows)) {
+        const segs = getSegments(rows[row]);
+        for (const s of segs) nimSum ^= s;
+    }
+    return nimSum;
+}
+
+function isAllSinglesFromRows(rows) {
+    for (const row of Object.keys(rows)) {
+        let consecutive = 0;
+        for (const v of rows[row]) {
+            if (v === 0) { consecutive++; if (consecutive >= 2) return false; }
+            else { consecutive = 0; }
+        }
+    }
+    return true;
+}
+
+// ============ UI NAVIGATION ============
+function setGameMode(mode, button) {
+    gameMode = mode;
+    document.querySelectorAll('.mode-btn').forEach(btn => btn.classList.remove('active'));
+    button.classList.add('active');
+
+    document.getElementById('singlePlayerOptions').classList.toggle('hidden', mode !== 'single');
+    document.getElementById('localOptions').classList.toggle('hidden', mode !== 'local');
+    document.getElementById('multiplayerOptions').classList.toggle('hidden', mode !== 'multi');
+}
+
+function startSinglePlayer() {
+    if (!currentUser) {
+        alert('Please login first to play single player');
+        return;
+    }
+
+    const difficulty = document.querySelector('input[name="difficulty"]:checked').value;
+    const turnOrder = document.querySelector('input[name="turn-order"]:checked').value;
+    const map = document.querySelector('input[name="single-map"]:checked').value;
+    const name = currentUser.username;
+
+    const diceOption    = document.getElementById('diceModeOption');
+    const diceCheckbox  = document.getElementById('diceModeCheckbox');
+    const diceMode      = diceOption && !diceOption.classList.contains('hidden') && diceCheckbox && diceCheckbox.checked;
+    const armourOption  = document.getElementById('armourModeOption');
+    const armourCheckbox= document.getElementById('armourModeCheckbox');
+    const armourMode    = armourOption && !armourOption.classList.contains('hidden') && armourCheckbox && armourCheckbox.checked;
+    const cascadeOption = document.getElementById('cascadeModeOption');
+    const cascadeCheckbox=document.getElementById('cascadeModeCheckbox');
+    const cascadeMode   = cascadeOption && !cascadeOption.classList.contains('hidden') && cascadeCheckbox && cascadeCheckbox.checked;
+    const doublesOption = document.getElementById('doublesModeOption');
+    const doublesCheckbox=document.getElementById('doublesModeCheckbox');
+    const doublesMode   = doublesOption && !doublesOption.classList.contains('hidden') && doublesCheckbox && doublesCheckbox.checked;
+    const sandOption    = document.getElementById('sandModeOption');
+    const sandCheckbox  = document.getElementById('sandModeCheckbox');
+    const sandMode      = sandOption && !sandOption.classList.contains('hidden') && sandCheckbox && sandCheckbox.checked;
+    const portalOption  = document.getElementById('portalModeOption');
+    const portalCheckbox= document.getElementById('portalModeCheckbox');
+    const portalMode    = portalOption && !portalOption.classList.contains('hidden') && portalCheckbox && portalCheckbox.checked;
+
+    gameState.difficulty  = difficulty;
+    gameState.turnOrder   = turnOrder;
+    gameState.map         = map;
+    gameState.playerName  = name;
+    gameState.diceMode    = diceMode;
+    gameState.armourMode  = armourMode;
+    gameState.cascadeMode = cascadeMode;
+    gameState.doublesMode = doublesMode;
+    gameState.sandMode    = sandMode;
+    gameState.portalMode  = portalMode;
+    gameState.timerSeconds = parseInt(document.querySelector('input[name="timer"]:checked')?.value || '0');
+    gameMode = 'single';
+
+    initGame();
+    showGameScreen();
+    if (!gameState.isPlayerTurn) setTimeout(computerMove, 1000);
+}
+
+function oneDeviceMulti() {
+    const map = document.querySelector('input[name="local-map"]:checked').value;
+    const p1Name = document.getElementById('localPlayer1Name').value.trim();
+    const p2Name = document.getElementById('localPlayer2Name').value.trim();
+    if (!p1Name) { alert('Please enter Player 1\'s name.'); return; }
+    if (!p2Name) { alert('Please enter Player 2\'s name.'); return; }
+
+    const diceOption  = document.getElementById('localDiceModeOption');
+    const diceCheckbox= document.getElementById('localDiceModeCheckbox');
+    const diceMode    = diceOption && !diceOption.classList.contains('hidden') && diceCheckbox && diceCheckbox.checked;
+
+    gameState.playerName  = p1Name;
+    gameState.player2Name = p2Name;
+    gameState.map         = map;
+    gameState.diceMode    = diceMode;
+    gameState.armourMode  = false;
+    gameState.cascadeMode = false;
+    gameState.doublesMode = false;
+    gameState.sandMode    = false;
+    gameState.portalMode  = false;
+    gameMode = 'local';
+    localStorage.setItem('localPlayer1Name', p1Name);
+    localStorage.setItem('localPlayer2Name', p2Name);
+    unlockAchievement('close');
+    initGame();
+    showGameScreen();
+}
+
+function createMultiplayerGame() {
+    // Multiplayer requires login
+    if (!currentUser) {
+        alert('Please login first to play multiplayer');
+        return;
+    }
+
+    const name = currentUser.username;
+    const map = document.querySelector('input[name="multi-map"]:checked').value;
+    const diceMode    = document.getElementById('multiDiceModeCheckbox')?.checked && !document.getElementById('multiDiceModeOption')?.classList.contains('hidden');
+    const doublesMode = document.getElementById('multiDoublesModeCheckbox')?.checked && !document.getElementById('multiDoublesModeOption')?.classList.contains('hidden');
+    const armourMode  = document.getElementById('multiArmourModeCheckbox')?.checked && !document.getElementById('multiArmourModeOption')?.classList.contains('hidden');
+    const portalMode  = document.getElementById('multiPortalModeCheckbox')?.checked && !document.getElementById('multiPortalModeOption')?.classList.contains('hidden');
+    const sandMode    = document.getElementById('multiSandModeCheckbox')?.checked && !document.getElementById('multiSandModeOption')?.classList.contains('hidden');
+    const cascadeMode = document.getElementById('multiCascadeModeCheckbox')?.checked && !document.getElementById('multiCascadeModeOption')?.classList.contains('hidden');
+
+    gameState.playerName = name;
+    gameState.map = map;
+    gameState.diceMode = false;
+    gameState.doublesMode = doublesMode;
+    gameState.armourMode = armourMode;
+    gameState.portalMode = portalMode;
+    gameState.sandMode = sandMode;
+    gameState.cascadeMode = cascadeMode;
+    unlockAchievement('friendly');
+    gameMode = 'multi';
+    initGame();
+    showGameScreen();
+    document.getElementById('submitBtn').disabled = true;
+    document.getElementById('gameState').textContent = 'Connecting...';
+    const ws = connectWebSocket(() => {
+        ws.send(JSON.stringify({ action: 'create_game', map, diceMode, doublesMode, armourMode, portalMode, sandMode, cascadeMode }));
+    });
+}
+
+function joinMultiplayerGame() {
+    if (!currentUser) {
+        alert('Please login first to join a game');
+        return;
+    }
+    document.getElementById('joinPlayerName').value = currentUser.username;
+    document.getElementById('codeModal').classList.add('show');
+}
+
+function submitGameCode() {
+    const code = document.getElementById('codeInput').value.trim().padStart(3, '0');
+    if (code.length !== 3 || !/^\d{3}$/.test(code)) { alert('Code must be 3 digits'); return; }
+
+    if (!currentUser) {
+        alert('Please login first to join a game');
+        closeCodeModal();
+        return;
+    }
+
+    const name = currentUser.username;
+    gameState.playerName = name;
+    unlockAchievement('friendly');
+    gameMode = 'multi';
+    closeCodeModal();
+    initGame();
+    showGameScreen();
+    document.getElementById('submitBtn').disabled = true;
+    document.getElementById('gameState').textContent = 'Connecting...';
+    const ws = connectWebSocket(() => {
+        ws.send(JSON.stringify({ action: 'join_game', code }));
+    });
+}
+
+function closeCodeModal() {
+    document.getElementById('codeModal').classList.remove('show');
+    document.getElementById('codeInput').value = '';
+}
+
+function showGameScreen() {
+    document.getElementById('mainMenuScreen').classList.add('hidden');
+    document.getElementById('gameScreen').classList.remove('hidden');
+}
+
+function playAgain() {
+    if (gameMode === 'single') {
+        initGame();
+        if (!gameState.isPlayerTurn) {
+            setTimeout(computerMove, 1000);
+        }
+    } else if (gameMode === 'local') {
+        initGame();
+    } else {
+        returnToMainMenu();
+    }
+}
+
+function returnToMainMenu() {
+    if (gameState.ws) {
+        gameState.ws.close();
+        gameState.ws = null;
+    }
+
+    gameState.playerNum = null;
+    gameState.currentTurn = null;
+    gameState.gameStartTime = null;
+
+    document.getElementById('gameScreen').classList.add('hidden');
+    document.getElementById('mainMenuScreen').classList.remove('hidden');
+    document.getElementById('gameCode').classList.add('hidden');
+    document.getElementById('codeDisplay').textContent = '';
+}
+
+// ============ WEBSOCKET MULTIPLAYER ============
+function getWsUrl() {
+    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${protocol}//${location.host}/ws`;
+}
+
+function connectWebSocket(onOpen) {
+    const ws = new WebSocket(getWsUrl());
+    gameState.ws = ws;
+
+    ws.onopen = () => {
+        if (onOpen) onOpen();
+    };
+
+    ws.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        handleWsMessage(data);
+    };
+
+    ws.onerror = () => {
+        alert('Connection error. Please try again.');
+    };
+
+    ws.onclose = () => {
+        if (!gameState.gameOver && gameMode === 'multi') {
+            document.getElementById('gameState').textContent = 'Connection lost.';
+        }
+    };
+
+    return ws;
+}
+
+function handleWsMessage(data) {
+    switch (data.type) {
+        case 'game_created':
+            gameState.playerNum = data.playerNum;
+            gameState.currentTurn = data.startingPlayer;
+            gameState.isPlayerTurn = gameState.playerNum === gameState.currentTurn;
+            document.getElementById('gameCode').classList.remove('hidden');
+            document.getElementById('codeDisplay').textContent = data.code;
+            document.getElementById('gameState').textContent = 'Waiting for opponent — share this code: ' + data.code;
+            document.getElementById('submitBtn').disabled = true;
+            break;
+
+        case 'game_started':
+            gameState.playerNum = data.playerNum;
+            gameState.rows = data.rows;
+            gameState.currentTurn = data.currentTurn;
+            gameState.isPlayerTurn = gameState.playerNum === gameState.currentTurn;
+            gameState.gameOver = false;
+            gameState.selected = {};
+            gameState.resultRecorded = false;
+            gameState.gameStartTime = Date.now();
+            gameState.diceMode = !!data.diceMode;
+            gameState.diceCap = data.diceCap || 0;
+            gameState.doublesMode = !!data.doublesMode;
+            gameState.armourMode = !!data.armourMode;
+            gameState.portalMode = !!data.portalMode;
+            gameState.sandMode = !!data.sandMode;
+            gameState.cascadeMode = !!data.cascadeMode;
+            gameState.armour = {};
+            gameState.pendingCascade = null;
+            // Initialize armour for multiplayer
+            if (gameState.armourMode) {
+                const rowNums = Object.keys(gameState.rows).map(Number);
+                for (const r of rowNums) {
+                    for (let i = 0; i < gameState.rows[r].length; i++) {
+                        if (gameState.rows[r][i] === 0 && Math.random() < 0.25) {
+                            gameState.armour[`${r}-${i}`] = 2;
+                        }
+                    }
+                }
+            }
+            // Initialize portals for multiplayer
+            if (gameState.portalMode) {
+                initPortals();
+            }
+            // Check "Oops" — VIP detection
+            fetch('/scoreboard').then(r => r.json()).then(board => {
+                const vipEntry = (board.multiplayer || []).find(e => e.name.toLowerCase() === 'vip');
+                if (vipEntry && gameState.playerName.toLowerCase() !== 'vip') {
+                    unlockAchievement('oops');
+                }
+            }).catch(() => {});
+            renderBoard();
+            updateGameState();
+            break;
+
+        case 'game_update':
+            gameState.rows = data.rows;
+            gameState.currentTurn = data.currentTurn;
+            gameState.isPlayerTurn = gameState.playerNum === gameState.currentTurn;
+            gameState.gameOver = !data.gameActive;
+            gameState.selected = {};
+            if (data.diceMode !== undefined) gameState.diceMode = !!data.diceMode;
+            if (data.diceCap !== undefined) gameState.diceCap = data.diceCap || 0;
+            renderBoard();
+            updateGameState();
+            break;
+
+        case 'player_disconnected':
+            if (!gameState.gameOver) {
+                document.getElementById('gameState').textContent = 'Opponent disconnected.';
+                document.getElementById('submitBtn').disabled = true;
+            }
+            break;
+
+        case 'error':
+            alert(data.message);
+            break;
+    }
+}
+
+// ============ GAME LOGIC ============
+function initGame() {
+    gameState.forcedRow = null;
+    gameState.rows = buildRows(gameState.map || 'classic');
+    gameState.selected = {};
+    gameState.gameOver = false;
+    gameState.resultRecorded = false;
+    gameState.diceCap = 0;
+    gameState.armour = {};
+    gameState.pendingCascade = null;
+    gameState.doublesActive = false;
+    gameState.portals = [];
+    gameState.killCircles = [];
+    gameState._hitKillCircle = false;
+    gameState.slayerStreak = 0;
+
+    if (gameMode === 'single') {
+        if (gameState.turnOrder === 'player-first') {
+            gameState.isPlayerTurn = true;
+        } else if (gameState.turnOrder === 'computer-first') {
+            gameState.isPlayerTurn = false;
+        } else {
+            gameState.isPlayerTurn = Math.random() < 0.5;
+        }
+    }
+    if (gameMode === 'local') {
+        gameState.localTurn = 1;
+        gameState.isPlayerTurn = true;
+    }
+
+    if (gameState.forcedMode) {
+        gameState.forcedRow = pickForcedRow();
+    }
+
+    // Scatter armoured circles — roughly 25% of available circles get armour
+    if (gameState.armourMode) {
+        const rowNums = Object.keys(gameState.rows).map(Number);
+        for (const r of rowNums) {
+            for (let i = 0; i < gameState.rows[r].length; i++) {
+                if (gameState.rows[r][i] === 0 && Math.random() < 0.25) {
+                    gameState.armour[`${r}-${i}`] = 2;
+                }
+            }
+        }
+    }
+
+    // Portal mode: create linked pairs and kill circles
+    if (gameState.portalMode) {
+        initPortals();
+    }
+
+    if (gameState.diceMode) rollDice();
+
+    renderBoard();
+    updateGameState();
+}
+function pickForcedRow() {
+    const rows = Object.keys(gameState.rows).map(Number);
+
+    for (const r of rows) {
+        if (gameState.rows[r].some(v => v === 0)) {
+            return r;
+        }
+    }
+    return null;
+}
+
+function renderBoard() {
+    const board = document.getElementById('board');
+    board.innerHTML = '';
+
+    const rowNums = Object.keys(gameState.rows).map(Number).sort((a, b) => a - b);
+    for (const rowNum of rowNums) {
+        const row = document.createElement('div');
+        row.className = 'row';
+
+        const label = document.createElement('div');
+        label.className = 'row-label';
+        label.textContent = `Row ${rowNum}`;
+        row.appendChild(label);
+
+        const circlesDiv = document.createElement('div');
+        circlesDiv.className = 'circles';
+
+        const circles = gameState.rows[rowNum];
+        for (let i = 0; i < circles.length; i++) {
+            const circle = document.createElement('div');
+            circle.className = 'circle';
+
+            const key = `${rowNum}-${i}`;
+            const armourHits = gameState.armour[key] || 0;
+
+            if (circles[i] === 1) {
+                circle.classList.add('removed');
+            } else {
+                if (gameState.selected[key]) {
+                    circle.classList.add('selected');
+                } else if (gameState.portalMode && isKillCircle(key)) {
+                    circle.classList.add('kill-circle');
+                } else if (armourHits === 2) {
+                    circle.classList.add('armoured');
+                } else if (armourHits === 1) {
+                    circle.classList.add('damaged');
+                }
+
+                // Portal visual: coloured ring
+                if (gameState.portalMode && isPortalCircle(key)) {
+                    const pIdx = getPortalIndex(key);
+                    if (pIdx >= 0) {
+                        circle.style.boxShadow = `0 0 0 3px ${PORTAL_COLORS[pIdx % PORTAL_COLORS.length]}`;
+                    }
+                }
+
+                circle.onclick = () => toggleCircle(rowNum, i);
+            }
+
+            circlesDiv.appendChild(circle);
+        }
+
+        row.appendChild(circlesDiv);
+        board.appendChild(row);
+    }
+
+    // Show cascade picker if waiting for player choice
+    if (gameState.pendingCascade && gameState.isPlayerTurn) {
+        renderCascadePicker();
+    }
+}
+
+function toggleCircle(row, pos) {
+    if (gameState.forcedMode && gameState.forcedRow !== null && row !== gameState.forcedRow) {
+        return;
+    }
+    if (gameState.gameOver || !gameState.isPlayerTurn) return;
+
+    // ⭐ FORCE MODE ENFORCEMENT (FIXED)
+    if (gameState.forcedMode && gameState.forcedRow !== null && row !== gameState.forcedRow) {
+        return;
+    }
+
+    const key = `${row}-${pos}`;
+
+    if (gameState.selected[key]) {
+        delete gameState.selected[key];
+        renderBoard();
+        return;
+    }
+
+    const circles = gameState.rows[row];
+    if (circles[pos] === 1) return;
+
+    const selectedRows = new Set(Object.keys(gameState.selected).map(k => k.split('-')[0]));
+    if (selectedRows.size > 0 && !selectedRows.has(String(row))) {
+        gameState.selected = {};
+    }
+
+    const currentSelection = Object.keys(gameState.selected)
+        .filter(k => k.split('-')[0] === String(row))
+        .map(k => parseInt(k.split('-')[1]))
+        .sort((a, b) => a - b);
+
+    if (currentSelection.length === 0) {
+        gameState.selected[key] = true;
+    } else {
+        const min = Math.min(...currentSelection);
+        const max = Math.max(...currentSelection);
+
+        if (pos < min) {
+            let blocked = false;
+            for (let i = pos; i < min; i++) {
+                if (circles[i] === 1) { blocked = true; break; }
+            }
+            if (blocked) {
+                gameState.selected = { [key]: true };
+            } else {
+                for (let i = pos; i < min; i++) {
+                    gameState.selected[`${row}-${i}`] = true;
+                }
+            }
+        } else if (pos > max) {
+            let blocked = false;
+            for (let i = max + 1; i <= pos; i++) {
+                if (circles[i] === 1) { blocked = true; break; }
+            }
+            if (blocked) {
+                gameState.selected = { [key]: true };
+            } else {
+                for (let i = max + 1; i <= pos; i++) {
+                    gameState.selected[`${row}-${i}`] = true;
+                }
+            }
+        } else if (pos === min || pos === max) {
+            delete gameState.selected[key];
+        } else {
+            gameState.selected = { [key]: true };
+        }
+    }
+
+    renderBoard();
+}
+
+function submitMove() {
+    if (gameState.gameOver || !gameState.isPlayerTurn) return;
+    if (gameState.pendingCascade) return;
+    clearTurnTimer();
+
+    const selectedKeys = Object.keys(gameState.selected);
+    if (selectedKeys.length === 0) {
+        alert('Please select at least one circle');
+        return;
+    }
+
+    const row = parseInt(selectedKeys[0].split('-')[0]);
+    const positions = selectedKeys
+        .map(k => parseInt(k.split('-')[1]))
+        .sort((a, b) => a - b);
+
+    if (gameState.forcedMode && gameState.forcedRow !== null && row !== gameState.forcedRow) {
+        alert('You must play in the forced row.');
+        return;
+    }
+
+    for (let i = 0; i < positions.length - 1; i++) {
+        if (positions[i + 1] !== positions[i] + 1) {
+            alert('Circles must be contiguous');
+            return;
+        }
+    }
+
+    if (gameState.diceMode && gameState.diceCap > 0 && positions.length > gameState.diceCap) {
+        alert(`🎲 The die rolled ${gameState.diceCap}. You can take at most ${gameState.diceCap} circle${gameState.diceCap === 1 ? '' : 's'} this turn.`);
+        return;
+    }
+
+    applyMove(row, positions);
+    gameState.selected = {};
+    gameState._lastPlayerMove = { row, positions };
+
+    // Kill circle: instant loss for the player who took it
+    if (gameState._hitKillCircle) {
+        gameState._hitKillCircle = false;
+        gameState.gameOver = true;
+        gameState.isPlayerTurn = true; // the current player loses
+        unlockAchievement('tough_luck');
+        renderBoard();
+        updateGameState();
+        return;
+    }
+
+    // Slayer achievement: take exactly 6 circles in one move, 3 times total
+    if (positions.length === 6) {
+        gameState.slayerStreak++;
+        if (gameState.slayerStreak >= 3) {
+            unlockAchievement('slayer');
+        }
+    }
+
+    // For doubles: count how many circles the player selected (the move size)
+    // Armoured circles that only got damaged still count as "taking 2" for doubles purposes
+    const moveSize = positions.length;
+
+    if (gameState.cascadeMode) {
+        const removed = positions.filter(p => gameState.rows[row][p] === 1);
+        if (removed.length > 0) {
+            const leftPos = removed[0];
+            const rightPos = removed[removed.length - 1];
+            const rowNums = Object.keys(gameState.rows).map(Number);
+            const hasAbove = rowNums.some(r => r < row && gameState.rows[r].some(v => v === 0));
+            if (hasAbove) {
+                gameState.pendingCascade = { row, leftPos, rightPos, moveSize };
+                renderBoard();
+                document.getElementById('submitBtn').disabled = true;
+                return;
+            }
+        }
+    }
+
+    finishTurn(moveSize);
+}
+function updateForcedRowAfterMove() {
+    if (!gameState.forcedMode) {
+        gameState.forcedRow = null;
+        return;
+    }
+
+    const rows = Object.keys(gameState.rows).map(Number).sort((a, b) => a - b);
+
+    for (const r of rows) {
+        if (gameState.rows[r].some(v => v === 0)) {
+            gameState.forcedRow = r;
+            return;
+        }
+    }
+
+    gameState.forcedRow = null;
+}
+
+function applyMove(row, positions) {
+    for (const pos of positions) {
+        const key = `${row}-${pos}`;
+
+        // Kill circle check — set a flag, game over will be handled by caller
+        if (gameState.portalMode && isKillCircle(key)) {
+            gameState._hitKillCircle = true;
+        }
+
+        if (gameState.armourMode && gameState.armour[key]) {
+            gameState.armour[key]--;
+            if (gameState.armour[key] <= 0) {
+                delete gameState.armour[key];
+                gameState.rows[row][pos] = 1;
+            }
+        } else {
+            gameState.rows[row][pos] = 1;
+        }
+
+        // Portal: also apply to the partner
+        if (gameState.portalMode) {
+            const partner = getPortalPartner(key);
+            if (partner && gameState.rows[partner.split('-')[0]]) {
+                const pRow = parseInt(partner.split('-')[0]);
+                const pPos = parseInt(partner.split('-')[1]);
+                if (gameState.rows[pRow] && gameState.rows[pRow][pPos] === 0) {
+                    // Kill circle check on partner too
+                    if (isKillCircle(partner)) {
+                        gameState._hitKillCircle = true;
+                    }
+                    if (gameState.armourMode && gameState.armour[partner]) {
+                        gameState.armour[partner]--;
+                        if (gameState.armour[partner] <= 0) {
+                            delete gameState.armour[partner];
+                            gameState.rows[pRow][pPos] = 1;
+                        }
+                    } else {
+                        gameState.rows[pRow][pPos] = 1;
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ============ PORTAL MODE ============
+function initPortals() {
+    gameState.portals = [];
+    gameState.killCircles = [];
+
+    const rowNums = Object.keys(gameState.rows).map(Number).sort((a, b) => a - b);
+    // Collect all available circle positions
+    const available = [];
+    for (const r of rowNums) {
+        for (let i = 0; i < gameState.rows[r].length; i++) {
+            if (gameState.rows[r][i] === 0) available.push(`${r}-${i}`);
+        }
+    }
+
+    if (available.length < 4) return; // not enough circles for portals
+
+    // Create 1-3 portal pairs depending on board size
+    const numPortals = Math.min(3, Math.floor(available.length / 5));
+
+    for (let p = 0; p < numPortals; p++) {
+        // Pick first circle: 70% chance row 3, 30% any other row
+        const row3Circles = available.filter(k => k.startsWith('3-'));
+        const nonRow3Circles = available.filter(k => !k.startsWith('3-'));
+        let firstKey;
+
+        if (row3Circles.length > 0 && Math.random() < 0.7) {
+            const idx = Math.floor(Math.random() * row3Circles.length);
+            firstKey = row3Circles[idx];
+        } else if (nonRow3Circles.length > 0) {
+            const idx = Math.floor(Math.random() * nonRow3Circles.length);
+            firstKey = nonRow3Circles[idx];
+        } else {
+            firstKey = available[Math.floor(Math.random() * available.length)];
+        }
+
+        // Remove first from available
+        available.splice(available.indexOf(firstKey), 1);
+
+        // Pick second circle: any row except the same row as first
+        const firstRow = firstKey.split('-')[0];
+        const otherRowCircles = available.filter(k => !k.startsWith(firstRow + '-'));
+        let secondKey;
+
+        if (otherRowCircles.length > 0) {
+            secondKey = otherRowCircles[Math.floor(Math.random() * otherRowCircles.length)];
+        } else {
+            secondKey = available[Math.floor(Math.random() * available.length)];
+        }
+
+        if (!secondKey) break;
+        available.splice(available.indexOf(secondKey), 1);
+
+        gameState.portals.push({ a: firstKey, b: secondKey });
+
+        // If one is armoured, make both armoured
+        if (gameState.armourMode) {
+            const aArmour = gameState.armour[firstKey];
+            const bArmour = gameState.armour[secondKey];
+            if (aArmour || bArmour) {
+                const maxHits = Math.max(aArmour || 0, bArmour || 0);
+                gameState.armour[firstKey] = maxHits;
+                gameState.armour[secondKey] = maxHits;
+            }
+        }
+    }
+
+    // Add 1 kill circle (if enough circles remain)
+    if (available.length > 2) {
+        const killIdx = Math.floor(Math.random() * available.length);
+        gameState.killCircles.push(available[killIdx]);
+        available.splice(killIdx, 1);
+    }
+}
+
+function getPortalPartner(key) {
+    for (const portal of gameState.portals) {
+        if (portal.a === key) return portal.b;
+        if (portal.b === key) return portal.a;
+    }
+    return null;
+}
+
+function isKillCircle(key) {
+    return gameState.killCircles.includes(key);
+}
+
+function isPortalCircle(key) {
+    return gameState.portals.some(p => p.a === key || p.b === key);
+}
+
+// Get the portal colour index for visual pairing
+function getPortalIndex(key) {
+    for (let i = 0; i < gameState.portals.length; i++) {
+        if (gameState.portals[i].a === key || gameState.portals[i].b === key) return i;
+    }
+    return -1;
+}
+
+const PORTAL_COLORS = ['#9b59b6', '#1abc9c', '#e67e22']; // purple, teal, orange for up to 3 pairs
+
+// ============ SAND MODE (GRAVITY) ============
+// After circles are removed, unsupported circles fall down.
+// A circle at (row r, pos p) is supported if the row below (r+1) has a circle at pos p or p+1.
+// If unsupported and both landing spots are empty, 50/50 left or right.
+function applySandGravity() {
+    if (!gameState.sandMode) return;
+
+    const rowNums = Object.keys(gameState.rows).map(Number).sort((a, b) => a - b);
+
+    // In our board: 0 = circle present, 1 = removed/empty
+    // Classic triangle: row r has r circles, row r+1 has r+1 (wider by 1, offset half-step)
+
+    let changed = true;
+    let iterations = 0;
+    while (changed && iterations < 50) {
+        changed = false;
+        iterations++;
+
+        // Process top to bottom — circles fall down
+        for (let ri = 0; ri < rowNums.length - 1; ri++) {
+            const r = rowNums[ri];
+            const belowR = rowNums[ri + 1];
+            const currentRow = gameState.rows[r];
+            const belowRow = gameState.rows[belowR];
+
+            for (let p = 0; p < currentRow.length; p++) {
+                if (currentRow[p] !== 0) continue; // no circle here
+
+                // Supported if below has a circle at p or p+1
+                const hasSupport =
+                    (p < belowRow.length && belowRow[p] === 0) ||
+                    (p + 1 < belowRow.length && belowRow[p + 1] === 0);
+
+                if (hasSupport) continue;
+
+                // Unsupported — find where it can land
+                const leftOpen = (p < belowRow.length && belowRow[p] === 1);
+                const rightOpen = (p + 1 < belowRow.length && belowRow[p + 1] === 1);
+
+                let landPos = -1;
+                if (leftOpen && rightOpen) {
+                    landPos = Math.random() < 0.5 ? p : p + 1;
+                } else if (leftOpen) {
+                    landPos = p;
+                } else if (rightOpen) {
+                    landPos = p + 1;
+                }
+
+                if (landPos >= 0) {
+                    currentRow[p] = 1;        // circle leaves
+                    belowRow[landPos] = 0;    // circle lands
+                    changed = true;
+                }
+            }
+        }
+    }
+}
+
+// ============ CASCADE MODE ============
+function renderCascadePicker() {
+    const board = document.getElementById('board');
+    const pc = gameState.pendingCascade;
+
+    const picker = document.createElement('div');
+    picker.id = 'cascadePicker';
+    picker.style.cssText = 'margin-top:16px; padding:14px; background:#e8f0fe; border:2px solid #667eea; border-radius:10px; text-align:center;';
+
+    const label = document.createElement('p');
+    label.style.cssText = 'font-weight:bold; margin-bottom:10px; color:#333;';
+    label.textContent = '⚡ Cascade: pick which end triggers the column removal';
+    picker.appendChild(label);
+
+    const btnLeft = document.createElement('button');
+    btnLeft.textContent = `Leftmost (col ${pc.leftPos + 1})`;
+    btnLeft.style.cssText = 'margin:4px 8px; background:#667eea; color:white; padding:8px 18px; border-radius:8px; border:none; cursor:pointer; font-size:15px;';
+    btnLeft.onclick = () => resolveCascade('left');
+
+    const btnRight = document.createElement('button');
+    btnRight.textContent = `Rightmost (col ${pc.rightPos + 1})`;
+    btnRight.style.cssText = 'margin:4px 8px; background:#764ba2; color:white; padding:8px 18px; border-radius:8px; border:none; cursor:pointer; font-size:15px;';
+    btnRight.onclick = () => resolveCascade('right');
+
+    picker.appendChild(btnLeft);
+    picker.appendChild(btnRight);
+    board.appendChild(picker);
+}
+
+// Apply the cascade: remove col `pos` in every row above `fromRow` (ascending)
+function applyCascade(fromRow, pos) {
+    const rowNums = Object.keys(gameState.rows).map(Number).sort((a, b) => a - b);
+    for (const r of rowNums) {
+        if (r >= fromRow) continue; // only rows above the played row
+        const rowArr = gameState.rows[r];
+        if (pos < rowArr.length && rowArr[pos] === 0) {
+            applyMove(r, [pos]);
+        }
+    }
+}
+
+function resolveCascade(side) {
+    const pc = gameState.pendingCascade;
+    if (!pc) return;
+    const pos = side === 'left' ? pc.leftPos : pc.rightPos;
+    gameState.pendingCascade = null;
+    applyCascade(pc.row, pos);
+    finishTurn(pc.moveSize || 0);
+}
+
+// Called by computer to pick the cascade side that leads to a better position
+function computerPickCascade(pc) {
+    // Try both sides, pick the one that leaves opponent in a losing position
+    const sides = ['left', 'right'];
+    for (const side of sides) {
+        const pos = side === 'left' ? pc.leftPos : pc.rightPos;
+        const saved = JSON.parse(JSON.stringify(gameState.rows));
+        const savedArmour = JSON.parse(JSON.stringify(gameState.armour));
+        applyCascade(pc.row, pos);
+        const losing = isMisereLosingPosition(gameState.rows);
+        gameState.rows = saved;
+        gameState.armour = savedArmour;
+        if (losing) return side;
+    }
+    // Default: pick left
+    return 'left';
+}
+
+// Shared post-move logic (after cascade resolved or cascade not active)
+// removedCount = number of circles actually fully removed this move (for doubles)
+function finishTurn(removedCount) {
+    applySandGravity();
+    renderBoard();
+    updateForcedRowAfterMove();
+
+    if (isGameOver()) {
+        gameState.gameOver = true;
+        gameState.doublesActive = false;
+        if (gameMode === 'multi' && gameState.ws) {
+            gameState.ws.send(JSON.stringify({ action: 'make_move', rows: gameState.rows, gameActive: false }));
+        }
+        updateGameState();
+        return;
+    }
+
+    // Doubles: taking exactly 2 fully-removed circles keeps your turn
+    const isDoubles = gameState.doublesMode && (removedCount === 2 || removedCount === 6);
+
+    if (gameMode === 'single') {
+        if (isDoubles) {
+            gameState.doublesActive = true;
+            gameState.isPlayerTurn = true;
+            if (gameState.diceMode) rollDice();
+            updateGameState();
+            return;
+        }
+        gameState.doublesActive = false;
+        gameState.isPlayerTurn = false;
+        if (gameState.diceMode) rollDice();
+        updateGameState();
+        setTimeout(computerMove, 1000);
+    } else if (gameMode === 'local') {
+        if (isDoubles) {
+            gameState.doublesActive = true;
+            gameState.isPlayerTurn = true;
+            gameState.selected = {};
+            if (gameState.diceMode) rollDice();
+            updateGameState();
+            return;
+        }
+        gameState.doublesActive = false;
+        gameState.localTurn = gameState.localTurn === 1 ? 2 : 1;
+        gameState.isPlayerTurn = true;
+        gameState.selected = {};
+        if (gameState.diceMode) rollDice();
+        updateGameState();
+    } else {
+        gameState.doublesActive = false;
+        gameState.isPlayerTurn = false;
+        updateGameState();
+        if (gameState.ws) {
+            gameState.ws.send(JSON.stringify({ action: 'make_move', rows: gameState.rows, gameActive: true }));
+        }
+    }
+}
+
+function computerMove() {
+    // Mirror mode: computer mirrors the player's last move on the opposite side
+    if (gameState.mirrorMode && gameState._lastPlayerMove) {
+        const lm = gameState._lastPlayerMove;
+        const rowArr = gameState.rows[lm.row];
+        if (rowArr) {
+            const rowLen = rowArr.length;
+            // Mirror positions from the right
+            const mirrorPositions = lm.positions
+                .map(p => rowLen - 1 - p)
+                .filter(p => p >= 0 && p < rowLen && rowArr[p] === 0)
+                .sort((a, b) => a - b);
+            if (mirrorPositions.length > 0) {
+                applyMove(lm.row, mirrorPositions);
+                if (gameState._hitKillCircle) {
+                    gameState._hitKillCircle = false;
+                    gameState.gameOver = true;
+                    gameState.isPlayerTurn = false;
+                    renderBoard();
+                    updateGameState();
+                    return;
+                }
+                applySandGravity();
+                renderBoard();
+                document.getElementById('gameState').textContent =
+                    `Computer mirrored: row ${lm.row}, positions ${mirrorPositions.map(p => p + 1).join(', ')}`;
+                if (isGameOver()) { gameState.gameOver = true; updateGameState(); return; }
+                gameState.isPlayerTurn = true;
+                if (gameState.diceMode) rollDice();
+                updateGameState();
+                return;
+            }
+        }
+        // If mirror isn't possible, fall through to normal AI
+    }
+
+    if (gameState.forcedMode && gameState.forcedRow !== null) {
+        const forcedMoves = getAllLegalMoves().filter(m => m.row === gameState.forcedRow);
+
+        if (forcedMoves.length > 0) {
+            const move = forcedMoves[Math.floor(Math.random() * forcedMoves.length)];
+            applyMove(move.row, move.positions);
+
+            // Kill circle: computer hit it = computer loses (player wins)
+            if (gameState._hitKillCircle) {
+                gameState._hitKillCircle = false;
+                gameState.gameOver = true;
+                gameState.isPlayerTurn = false;
+                renderBoard();
+                updateGameState();
+                return;
+            }
+
+            if (gameState.cascadeMode) {
+                const removed = move.positions.filter(p => gameState.rows[move.row][p] === 1);
+                if (removed.length > 0) {
+                    const rowNums = Object.keys(gameState.rows).map(Number);
+                    const hasAbove = rowNums.some(r => r < move.row && gameState.rows[r].some(v => v === 0));
+                    if (hasAbove) {
+                        const pc = { row: move.row, leftPos: removed[0], rightPos: removed[removed.length - 1] };
+                        const side = computerPickCascade(pc);
+                        applyCascade(move.row, side === 'left' ? pc.leftPos : pc.rightPos);
+                    }
+                }
+            }
+
+            applySandGravity();
+            renderBoard();
+            document.getElementById('gameState').textContent =
+                `Computer removed row ${move.row}, circles ${move.positions.map(p => p + 1).join(', ')}`;
+
+            if (isGameOver()) { gameState.gameOver = true; updateGameState(); return; }
+
+            // Doubles check for forced-row path
+            if (gameState.doublesMode && (move.positions.length === 2 || move.positions.length === 6)) {
+                if (gameState.diceMode) rollDice();
+                updateGameState();
+                setTimeout(computerMove, 1000);
+                return;
+            }
+
+            gameState.isPlayerTurn = true;
+            if (gameState.diceMode) rollDice();
+            updateGameState();
+            return;
+        }
+    }
+
+    if (gameMode !== 'multi') {
+        const move = findBestMove(gameState.difficulty);
+        if (!move) {
+            gameState.gameOver = true;
+            updateGameState();
+            return;
+        }
+        applyMove(move.row, move.positions);
+
+        // Kill circle: computer hit it = computer loses
+        if (gameState._hitKillCircle) {
+            gameState._hitKillCircle = false;
+            gameState.gameOver = true;
+            gameState.isPlayerTurn = false;
+            renderBoard();
+            updateGameState();
+            return;
+        }
+
+        if (gameState.cascadeMode) {
+            const removed = move.positions.filter(p => gameState.rows[move.row][p] === 1);
+            if (removed.length > 0) {
+                const rowNums = Object.keys(gameState.rows).map(Number);
+                const hasAbove = rowNums.some(r => r < move.row && gameState.rows[r].some(v => v === 0));
+                if (hasAbove) {
+                    const pc = { row: move.row, leftPos: removed[0], rightPos: removed[removed.length - 1] };
+                    const side = computerPickCascade(pc);
+                    applyCascade(move.row, side === 'left' ? pc.leftPos : pc.rightPos);
+                }
+            }
+        }
+
+        applySandGravity();
+        renderBoard();
+        document.getElementById('gameState').textContent =
+            `Computer removed row ${move.row}, circles ${move.positions.map(p => p + 1).join(', ')}`;
+
+        if (isGameOver()) { gameState.gameOver = true; updateGameState(); return; }
+
+        // Doubles: computer took exactly 2 or 6 → goes again
+        if (gameState.doublesMode && (move.positions.length === 2 || move.positions.length === 6)) {
+            if (gameState.diceMode) rollDice();
+            updateGameState();
+            setTimeout(computerMove, 1000);
+            return;
+        }
+
+        gameState.isPlayerTurn = true;
+        if (gameState.diceMode) rollDice();
+        updateGameState();
+    }
+}
+
+// ============ AI & GAME THEORY ============
+function findBestMove(difficulty) {
+    const legalMoves = getAllLegalMoves();
+    if (legalMoves.length === 0) return null;
+
+    if (difficulty === 'easy') {
+        // Easy: prefer taking 1 circle (75% of the time), occasionally 2
+        const smallMoves = legalMoves.filter(m => m.positions.length === 1);
+        if (smallMoves.length > 0 && Math.random() < 0.75) {
+            return smallMoves[Math.floor(Math.random() * smallMoves.length)];
+        }
+        const medMoves = legalMoves.filter(m => m.positions.length <= 2);
+        if (medMoves.length > 0) {
+            return medMoves[Math.floor(Math.random() * medMoves.length)];
+        }
+        return legalMoves[Math.floor(Math.random() * legalMoves.length)];
+    }
+
+    // For doubles mode, use the doubles-aware search
+    if (gameState.doublesMode) {
+        const doublesMove = findDoublesOptimalMove(difficulty);
+        if (doublesMove) return doublesMove;
+    }
+
+    const optimalMove = findOptimalMove();
+
+    if (difficulty === 'medium') {
+        // Medium: 65% chance to play optimally, otherwise random
+        if (optimalMove && Math.random() < 0.65) {
+            return optimalMove;
+        }
+        return legalMoves[Math.floor(Math.random() * legalMoves.length)];
+    }
+
+    // Hard: always play optimally if possible
+    return optimalMove || legalMoves[Math.floor(Math.random() * legalMoves.length)];
+}
+
+function getAllLegalMoves() {
+    const moves = [];
+    const rowNums = Object.keys(gameState.rows).map(Number).sort((a, b) => a - b);
+
+    for (const row of rowNums) {
+        const circles = gameState.rows[row];
+        let inSegment = false;
+        let segmentStart = 0;
+
+        for (let i = 0; i <= circles.length; i++) {
+            if (i < circles.length && circles[i] === 0) {
+                if (!inSegment) {
+                    segmentStart = i;
+                    inSegment = true;
+                }
+            } else {
+                if (inSegment) {
+                    for (let start = segmentStart; start < i; start++) {
+                        for (let end = start; end < i; end++) {
+                            moves.push({
+                                row,
+                                positions: Array.from({ length: end - start + 1 }, (_, j) => start + j)
+                            });
+                        }
+                    }
+                    inSegment = false;
+                }
+            }
+        }
+    }
+
+    if (gameState.diceMode && gameState.diceCap > 0) {
+        return moves.filter(m => m.positions.length <= gameState.diceCap);
+    }
+    return moves;
+}
+
+function getSegments(row) {
+    const segments = [];
+    let current = 0;
+
+    for (let val of row) {
+        if (val === 0) {
+            current++;
+        } else if (current > 0) {
+            segments.push(current);
+            current = 0;
+        }
+    }
+
+    if (current > 0) {
+        segments.push(current);
+    }
+
+    return segments;
+}
+
+function isMisereLosingPosition(rows) {
+    const allSegs = [];
+    for (const row of Object.keys(rows)) {
+        allSegs.push(...getSegments(rows[row]));
+    }
+
+    const allSmall = allSegs.every(s => s <= 1);
+
+    if (allSmall) {
+        // In misère Nim with all heaps ≤ 1: losing if odd number of heaps
+        return allSegs.length % 2 === 1;
+    }
+
+    let nimSum = 0;
+    for (let seg of allSegs) nimSum ^= seg;
+    return nimSum === 0;
+}
+
+// Safe simulation for AI lookahead — no portal/kill/sand side effects
+function simulateMove(row, positions) {
+    for (const pos of positions) {
+        const key = `${row}-${pos}`;
+        if (gameState.armourMode && gameState.armour[key]) {
+            gameState.armour[key]--;
+            if (gameState.armour[key] <= 0) {
+                delete gameState.armour[key];
+                gameState.rows[row][pos] = 1;
+            }
+        } else {
+            gameState.rows[row][pos] = 1;
+        }
+    }
+}
+
+function findOptimalMove() {
+    const legalMoves = getAllLegalMoves();
+    if (legalMoves.length === 0) return null;
+
+    if (isMisereLosingPosition(gameState.rows)) return null;
+
+    for (const move of legalMoves) {
+        const savedRows = JSON.parse(JSON.stringify(gameState.rows));
+        const savedArmour = JSON.parse(JSON.stringify(gameState.armour));
+
+        simulateMove(move.row, move.positions);
+
+        // Skip moves that would hit a kill circle
+        if (gameState.portalMode) {
+            let hitsKill = false;
+            for (const pos of move.positions) {
+                const key = `${move.row}-${pos}`;
+                if (isKillCircle(key)) { hitsKill = true; break; }
+                const partner = getPortalPartner(key);
+                if (partner && isKillCircle(partner)) { hitsKill = true; break; }
+            }
+            if (hitsKill) {
+                gameState.rows = savedRows;
+                gameState.armour = savedArmour;
+                continue;
+            }
+        }
+
+        const opponentLosing = isMisereLosingPosition(gameState.rows);
+        gameState.rows = savedRows;
+        gameState.armour = savedArmour;
+
+        if (opponentLosing) {
+            return move;
+        }
+    }
+
+    return null;
+}
+
+// ============ DOUBLES-AWARE AI ============
+// In doubles mode, taking exactly 2 gives you another turn.
+// The AI simulates chains of 2-takes to find winning sequences.
+function findDoublesOptimalMove(difficulty) {
+    const legalMoves = getAllLegalMoves();
+    if (legalMoves.length === 0) return null;
+
+    // Try to find a chain of exactly-2 or exactly-6 moves that leads to a win or leaves opponent losing
+    const keepTurnMoves = legalMoves.filter(m => m.positions.length === 2 || m.positions.length === 6);
+    const otherMoves = legalMoves.filter(m => m.positions.length !== 2 && m.positions.length !== 6);
+
+    // Hard: deep search — try chains of 2s then a finishing move
+    if (difficulty === 'hard') {
+        const result = doublesDeepSearch(5); // search up to 5 chained doubles
+        if (result) return result;
+    }
+
+    // Medium: try one level of doubles chaining
+    if (difficulty === 'medium' || difficulty === 'hard') {
+        for (const move of keepTurnMoves) {
+            const savedRows = JSON.parse(JSON.stringify(gameState.rows));
+            const savedArmour = JSON.parse(JSON.stringify(gameState.armour));
+            simulateMove(move.row, move.positions);
+            if (isGameOver()) {
+                // Taking 2 ended the game — opponent took last? No, WE took last = we lose
+                gameState.rows = savedRows;
+                gameState.armour = savedArmour;
+                continue; // don't take the last circle
+            }
+
+            // After taking 2, we get another turn. Check if we can now win.
+            const followUp = findOptimalMoveFromState();
+            gameState.rows = savedRows;
+            gameState.armour = savedArmour;
+
+            if (followUp) return move; // start the chain with this 2-take
+        }
+    }
+
+    // Fall back to standard Nim
+    return findOptimalMove();
+}
+
+// Deep search: try chains of 2-moves, then evaluate
+function doublesDeepSearch(maxDepth) {
+    const savedRows = JSON.parse(JSON.stringify(gameState.rows));
+    const savedArmour = JSON.parse(JSON.stringify(gameState.armour));
+
+    function search(depth, firstMove) {
+        if (depth <= 0) {
+            // Evaluate: is opponent in a losing position?
+            const losing = isMisereLosingPosition(gameState.rows);
+            gameState.rows = JSON.parse(JSON.stringify(savedRows));
+            gameState.armour = JSON.parse(JSON.stringify(savedArmour));
+            return losing ? firstMove : null;
+        }
+
+        const moves = getAllLegalMoves();
+        const keepMoves = moves.filter(m => m.positions.length === 2 || m.positions.length === 6);
+
+        // Try each keep-turn move (gives us another turn)
+        for (const move of keepMoves) {
+            const preRows = JSON.parse(JSON.stringify(gameState.rows));
+            const preArmour = JSON.parse(JSON.stringify(gameState.armour));
+            simulateMove(move.row, move.positions);
+            if (isGameOver()) {
+                // We took the last circle = we lose, skip
+                gameState.rows = preRows;
+                gameState.armour = preArmour;
+                continue;
+            }
+
+            const result = search(depth - 1, firstMove || move);
+            if (result) {
+                gameState.rows = JSON.parse(JSON.stringify(savedRows));
+                gameState.armour = JSON.parse(JSON.stringify(savedArmour));
+                return result;
+            }
+
+            gameState.rows = preRows;
+            gameState.armour = preArmour;
+        }
+
+        // Try finishing with a non-keep-turn move that leaves opponent losing
+        const endMoves = moves.filter(m => m.positions.length !== 2 && m.positions.length !== 6);
+        for (const move of endMoves) {
+            const preRows = JSON.parse(JSON.stringify(gameState.rows));
+            const preArmour = JSON.parse(JSON.stringify(gameState.armour));
+            simulateMove(move.row, move.positions);
+            if (isGameOver()) {
+                // We took last = we lose
+                gameState.rows = preRows;
+                gameState.armour = preArmour;
+                continue;
+            }
+
+            if (isMisereLosingPosition(gameState.rows)) {
+                gameState.rows = JSON.parse(JSON.stringify(savedRows));
+                gameState.armour = JSON.parse(JSON.stringify(savedArmour));
+                return firstMove || move;
+            }
+
+            gameState.rows = preRows;
+            gameState.armour = preArmour;
+        }
+
+        return null;
+    }
+
+    const result = search(maxDepth, null);
+    gameState.rows = JSON.parse(JSON.stringify(savedRows));
+    gameState.armour = JSON.parse(JSON.stringify(savedArmour));
+    return result;
+}
+
+// Helper: find optimal move from current (already-modified) state
+function findOptimalMoveFromState() {
+    const legalMoves = getAllLegalMoves();
+    if (legalMoves.length === 0) return null;
+    if (isMisereLosingPosition(gameState.rows)) return null;
+
+    for (const move of legalMoves) {
+        const savedRows = JSON.parse(JSON.stringify(gameState.rows));
+        const savedArmour = JSON.parse(JSON.stringify(gameState.armour));
+        simulateMove(move.row, move.positions);
+        const opponentLosing = isMisereLosingPosition(gameState.rows);
+        gameState.rows = savedRows;
+        gameState.armour = savedArmour;
+        if (opponentLosing) return move;
+    }
+    return null;
+}
+
+// ============ GAME OVER ============
+function isGameOver() {
+    for (const row of Object.keys(gameState.rows)) {
+        for (let i = 0; i < gameState.rows[row].length; i++) {
+            if (gameState.rows[row][i] === 0) return false;
+            // damaged circle (hit once but not yet removed) is still in play
+            if (gameState.armour[`${row}-${i}`]) return false;
+        }
+    }
+    return true;
+}
+
+function updateGameState() {
+    const stateDiv = document.getElementById('gameState');
+    updateDiceDisplay();
+
+    if (gameState.gameOver) {
+        stateDiv.className = 'game-over';
+        const playerWon = !gameState.isPlayerTurn;
+
+        if (gameMode === 'single') {
+            stateDiv.textContent = playerWon
+                ? '🎉 You win! Computer took the last circle.'
+                : '💻 Computer wins! You took the last circle.';
+
+            if (!gameState.resultRecorded) {
+                gameState.resultRecorded = true;
+                if (playerWon && !tutorialActive) {
+                    recordSinglePlayerWin(gameState.playerName, gameState.difficulty);
+                    // Achievements
+                    if (gameState.difficulty === 'medium') unlockAchievement('novice');
+                    if (gameState.difficulty === 'hard')   unlockAchievement('patterner');
+                    if (gameState.difficulty === 'hard' && gameState.turnOrder === 'computer-first') {
+                        unlockAchievement('cheater');
+                    }
+                    // CrAZy tAxi: win with ALL modifiers on
+                    if (gameState.diceMode && gameState.doublesMode && gameState.armourMode &&
+                        gameState.sandMode && gameState.cascadeMode && gameState.portalMode) {
+                        unlockAchievement('crazy_taxi');
+                    }
+                    checkWinAchievements(gameState.playerName);
+                }
+                // Tutorial step 3 win check
+                if (playerWon && checkTutorialWin()) {
+                    setTimeout(onTutorialWin, 800);
+                }
+            }
+        } else if (gameMode === 'local') {
+            // the player who just submitted took the last circle and loses
+            const loserName = gameState.localTurn === 1 ? gameState.playerName : gameState.player2Name;
+            const winnerName = gameState.localTurn === 1 ? gameState.player2Name : gameState.playerName;
+            stateDiv.textContent = `🎉 ${winnerName} wins! ${loserName} took the last circle.`;
+        } else {
+            stateDiv.textContent = playerWon
+                ? '🎉 You win! Opponent took the last circle.'
+                : '💻 Opponent wins! You took the last circle.';
+
+            if (!gameState.resultRecorded && gameState.gameStartTime) {
+                gameState.resultRecorded = true;
+                const duration = Math.round((Date.now() - gameState.gameStartTime) / 1000);
+                recordMultiplayerResult(gameState.playerName, playerWon, duration);
+                if (playerWon) checkWinAchievements(gameState.playerName);
+            }
+        }
+
+        document.getElementById('submitBtn').disabled = true;
+        document.getElementById('replayBtn').classList.remove('hidden');
+        return;
+    }
+
+    document.getElementById('replayBtn').classList.add('hidden');
+    document.getElementById('submitBtn').disabled = gameState.pendingCascade ? true : false;
+
+    if (gameState.pendingCascade) {
+        stateDiv.className = 'player-turn';
+        stateDiv.textContent = '⚡ Pick your cascade direction below';
+        return;
+    }
+
+    if (gameState.isPlayerTurn) {
+        stateDiv.className = 'player-turn';
+        if (gameState.doublesActive) {
+            if (gameMode === 'local') {
+                const name = gameState.localTurn === 1 ? gameState.playerName : gameState.player2Name;
+                stateDiv.textContent = `🎯 Doubles! ${name} goes again`;
+            } else {
+                stateDiv.textContent = '🎯 Doubles! You took exactly 2 — go again';
+            }
+        } else if (gameMode === 'local') {
+            const name = gameState.localTurn === 1 ? gameState.playerName : gameState.player2Name;
+            stateDiv.textContent = `👤 ${name}'s turn - select circles from one row`;
+        } else {
+            stateDiv.textContent = '👤 Your turn - select circles from one row';
+        }
+    } else {
+        stateDiv.className = 'opponent-turn';
+        stateDiv.textContent = gameMode === 'single'
+            ? '🤖 Computer is thinking...'
+            : '⏳ Waiting for opponent...';
+    }
+
+    // Auto-finish button: show when all remaining circles are isolated singles
+    showAutoFinishButton();
+
+    // Start timer if applicable
+    if (gameState.isPlayerTurn && !gameState.gameOver && !gameState.pendingCascade) {
+        startTurnTimer();
+    } else {
+        clearTurnTimer();
+    }
+}
+
+// ============ AUTO-FINISH ============
+function isAllSingles() {
+    // Check if every remaining circle is isolated (no contiguous pairs)
+    for (const row of Object.keys(gameState.rows)) {
+        const circles = gameState.rows[row];
+        let consecutive = 0;
+        for (let i = 0; i < circles.length; i++) {
+            if (circles[i] === 0 && !gameState.armour[`${row}-${i}`]) {
+                consecutive++;
+                if (consecutive >= 2) return false;
+            } else {
+                consecutive = 0;
+            }
+        }
+    }
+    return true;
+}
+
+function countRemaining() {
+    let count = 0;
+    for (const row of Object.keys(gameState.rows)) {
+        for (let i = 0; i < gameState.rows[row].length; i++) {
+            if (gameState.rows[row][i] === 0) count++;
+        }
+    }
+    return count;
+}
+
+function showAutoFinishButton() {
+    // Remove existing button if any
+    const existing = document.getElementById('autoFinishBtn');
+    if (existing) existing.remove();
+
+    // Only show in single-player vanilla (no modifiers), player's turn, 2+ wins, all singles
+    if (gameMode !== 'single') return;
+    if (!gameState.isPlayerTurn) return;
+    if (gameState.gameOver) return;
+    if (gameState.playerLevel < 2) return;
+    if (!isAllSingles()) return;
+    if (countRemaining() < 2) return;
+    // Disable for any modified game
+    if (gameState.diceMode || gameState.doublesMode || gameState.armourMode ||
+        gameState.sandMode || gameState.cascadeMode || gameState.portalMode || gameState.mirrorMode) return;
+
+    const controls = document.querySelector('.controls');
+    if (!controls) return;
+
+    const btn = document.createElement('button');
+    btn.id = 'autoFinishBtn';
+    btn.textContent = '⚡ Auto-finish';
+    btn.style.cssText = 'background:#27ae60; color:white; padding:10px 20px; font-size:14px; border-radius:8px; border:none; cursor:pointer; font-weight:bold;';
+    btn.onclick = runAutoFinish;
+    controls.appendChild(btn);
+}
+
+function runAutoFinish() {
+    // Remove the button
+    const btn = document.getElementById('autoFinishBtn');
+    if (btn) btn.remove();
+
+    // Play out the endgame: alternate taking one single at a time
+    autoFinishStep();
+}
+
+function autoFinishStep() {
+    if (gameState.gameOver) return;
+
+    // Find the first available single circle
+    const rowNums = Object.keys(gameState.rows).map(Number).sort((a, b) => a - b);
+    let targetRow = null, targetPos = null;
+    for (const r of rowNums) {
+        for (let i = 0; i < gameState.rows[r].length; i++) {
+            if (gameState.rows[r][i] === 0 && !gameState.armour[`${r}-${i}`]) {
+                targetRow = r;
+                targetPos = i;
+                break;
+            }
+        }
+        if (targetRow !== null) break;
+    }
+
+    if (targetRow === null) return; // shouldn't happen
+
+    if (gameState.isPlayerTurn) {
+        // Player takes one
+        applyMove(targetRow, [targetPos]);
+        applySandGravity();
+        renderBoard();
+
+        if (isGameOver()) {
+            gameState.gameOver = true;
+            gameState.isPlayerTurn = true; // player took last = player loses
+            updateGameState();
+            return;
+        }
+
+        gameState.isPlayerTurn = false;
+        updateGameState();
+        setTimeout(autoFinishStep, 400);
+    } else {
+        // Computer takes one
+        applyMove(targetRow, [targetPos]);
+        applySandGravity();
+        renderBoard();
+        document.getElementById('gameState').textContent =
+            `Computer took row ${targetRow}`;
+
+        if (isGameOver()) {
+            gameState.gameOver = true;
+            gameState.isPlayerTurn = false; // computer took last = computer loses
+            updateGameState();
+            return;
+        }
+
+        gameState.isPlayerTurn = true;
+        updateGameState();
+        setTimeout(autoFinishStep, 400);
+    }
+}
+
+// ============ SCOREBOARD ============
+async function recordSinglePlayerWin(name, difficulty) {
+    try {
+        await fetch('/scoreboard/single', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, difficulty })
+        });
+        refreshUnlocks();
+    } catch (e) {
+        console.error('Failed to record score:', e);
+    }
+}
+
+async function recordMultiplayerResult(name, won, durationSeconds) {
+    try {
+        await fetch('/scoreboard/multi', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, won, duration: durationSeconds })
+        });
+        refreshUnlocks();
+    } catch (e) {
+        console.error('Failed to record score:', e);
+    }
+}
+
+function formatTime(seconds) {
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+async function showScoreboard() {
+    document.getElementById('scoreboardModal').classList.add('show');
+    ['easy', 'medium', 'hard'].forEach(diff => {
+        document.getElementById(`score-${diff}`).innerHTML =
+            '<tr class="empty-row"><td colspan="3">Loading...</td></tr>';
+    });
+    document.getElementById('score-multi').innerHTML =
+        '<tr class="empty-row"><td colspan="5">Loading...</td></tr>';
+
+    try {
+        const res = await fetch('/scoreboard');
+        const board = await res.json();
+        renderSingleScore(board);
+        renderMultiScore(board);
+    } catch (e) {
+        console.error('Failed to load scoreboard:', e);
+    }
+}
+
+function closeScoreboard() {
+    document.getElementById('scoreboardModal').classList.remove('show');
+}
+
+function switchScoreTab(tab, btn) {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('singleScoreTab').classList.toggle('hidden', tab !== 'single');
+    document.getElementById('multiScoreTab').classList.toggle('hidden', tab !== 'multi');
+}
+
+function renderSingleScore(board) {
+    ['easy', 'medium', 'hard'].forEach(diff => {
+        const tbody = document.getElementById(`score-${diff}`);
+        if (!tbody) return;
+        const entries = board.singlePlayer[diff];
+        if (entries.length === 0) {
+            tbody.innerHTML = '<tr class="empty-row"><td colspan="3">No games yet</td></tr>';
+        } else {
+            tbody.innerHTML = entries.slice(0, 10).map((e, i) =>
+                `<tr><td>${i + 1}</td><td>${e.name}</td><td>${e.wins}</td></tr>`
+            ).join('');
+        }
+    });
+}
+
+function renderMultiScore(board) {
+    const tbody = document.getElementById('score-multi');
+    if (!tbody) return;
+    const entries = board.multiplayer;
+    if (entries.length === 0) {
+        tbody.innerHTML = '<tr class="empty-row"><td colspan="5">No games yet</td></tr>';
+    } else {
+        tbody.innerHTML = entries.slice(0, 10).map((e, i) =>
+            `<tr>
+                <td>${i + 1}</td>
+                <td>${e.name}</td>
+                <td>${e.wins}</td>
+                <td>${e.gamesPlayed}</td>
+                <td>${e.fastestTime !== null ? formatTime(e.fastestTime) : '—'}</td>
+            </tr>`
+        ).join('');
+    }
+}
+
+// ============ UNLOCK CHECKS ============
+function applyUnlock(option, checkbox, eligible) {
+    if (!option) return;
+    if (eligible) {
+        option.classList.remove('hidden');
+    } else {
+        option.classList.add('hidden');
+        if (checkbox) checkbox.checked = false;
+    }
+}
+
+async function refreshUnlocks() {
+    const singleName = (document.getElementById('singlePlayerName')?.value || '').trim();
+    const multiName = (document.getElementById('multiPlayerName')?.value || '').trim();
+
+    if (!singleName && !multiName) return;
+
+    try {
+        const res = await fetch('/scoreboard');
+        const board = await res.json();
+
+        function getPlayerWins(name) {
+            let total = 0;
+            for (const diff of ['easy', 'medium', 'hard']) {
+                const list = board.singlePlayer?.[diff] || [];
+                const entry = list.find(e => e.name.toLowerCase() === name.toLowerCase());
+                if (entry) total += entry.wins;
+            }
+            const multiList = board.multiplayer || [];
+            const mEntry = multiList.find(e => e.name.toLowerCase() === name.toLowerCase());
+            if (mEntry) total += mEntry.wins;
+            return total;
+        }
+
+        if (singleName) {
+            const wins = getPlayerWins(singleName);
+            gameState.playerLevel = wins;
+
+            applyUnlock(
+                document.getElementById('doublesModeOption'),
+                document.getElementById('doublesModeCheckbox'),
+                wins >= 3
+            );
+            applyUnlock(
+                document.getElementById('diceModeOption'),
+                document.getElementById('diceModeCheckbox'),
+                wins >= 6
+            );
+            applyUnlock(
+                document.getElementById('armourModeOption'),
+                document.getElementById('armourModeCheckbox'),
+                wins >= 10
+            );
+            applyUnlock(
+                document.getElementById('cascadeModeOption'),
+                document.getElementById('cascadeModeCheckbox'),
+                wins >= 20
+            );
+            applyUnlock(
+                document.getElementById('sandModeOption'),
+                document.getElementById('sandModeCheckbox'),
+                wins >= 15
+            );
+            applyUnlock(
+                document.getElementById('portalModeOption'),
+                document.getElementById('portalModeCheckbox'),
+                wins >= 12
+            );
+            // Custom map editor unlock
+            const customEl = document.getElementById('customMapOption');
+            if (customEl) {
+                if (wins >= 5) customEl.classList.remove('hidden');
+                else customEl.classList.add('hidden');
+            }
+        }
+
+        if (multiName) {
+            const totalWins = getPlayerWins(multiName);
+            applyUnlock(document.getElementById('multiDoublesModeOption'), document.getElementById('multiDoublesModeCheckbox'), totalWins >= 3);
+            applyUnlock(document.getElementById('multiDiceModeOption'), document.getElementById('multiDiceModeCheckbox'), totalWins >= 6);
+            applyUnlock(document.getElementById('multiArmourModeOption'), document.getElementById('multiArmourModeCheckbox'), totalWins >= 10);
+            applyUnlock(document.getElementById('multiPortalModeOption'), document.getElementById('multiPortalModeCheckbox'), totalWins >= 12);
+            applyUnlock(document.getElementById('multiSandModeOption'), document.getElementById('multiSandModeCheckbox'), totalWins >= 15);
+            applyUnlock(document.getElementById('multiCascadeModeOption'), document.getElementById('multiCascadeModeCheckbox'), totalWins >= 20);
+        }
+
+    } catch (e) {
+        console.error('Failed to check unlocks:', e);
+    }
+}
+
+// ============ MAP EDITOR & PREVIEW ============
+let customMapGrid = Array.from({ length: 7 }, () => Array(7).fill(false));
+
+function openMapEditor() {
+    customMapGrid = Array.from({ length: 7 }, () => Array(7).fill(false));
+    renderMapEditor();
+    document.getElementById('mapEditorModal').classList.add('show');
+}
+
+function closeMapEditor() {
+    document.getElementById('mapEditorModal').classList.remove('show');
+}
+
+function renderMapEditor() {
+    const grid = document.getElementById('mapEditorGrid');
+    grid.innerHTML = '';
+    for (let r = 0; r < 7; r++) {
+        const rowDiv = document.createElement('div');
+        rowDiv.style.cssText = 'display:flex; gap:4px; align-items:center;';
+        const label = document.createElement('span');
+        label.style.cssText = 'width:24px; font-size:12px; color:#999; text-align:right; margin-right:4px;';
+        label.textContent = r + 1;
+        rowDiv.appendChild(label);
+        for (let c = 0; c < 7; c++) {
+            const cell = document.createElement('div');
+            cell.className = 'map-editor-cell' + (customMapGrid[r][c] ? ' active' : '');
+            cell.onclick = () => {
+                customMapGrid[r][c] = !customMapGrid[r][c];
+                renderMapEditor();
+            };
+            rowDiv.appendChild(cell);
+        }
+        grid.appendChild(rowDiv);
+    }
+}
+
+function clearMapEditor() {
+    customMapGrid = Array.from({ length: 7 }, () => Array(7).fill(false));
+    renderMapEditor();
+}
+
+function saveCustomMap() {
+    // Convert grid to a map format: count active cells per row
+    const rows = {};
+    let hasCircles = false;
+    for (let r = 0; r < 7; r++) {
+        const count = customMapGrid[r].filter(v => v).length;
+        if (count > 0) {
+            rows[r + 1] = count;
+            hasCircles = true;
+        }
+    }
+    if (!hasCircles) {
+        alert('Please add at least one circle to your map.');
+        return;
+    }
+    // Store as a custom map entry
+    MAPS.custom = Object.values(rows);
+    closeMapEditor();
+    // Select the custom radio
+    const radio = document.querySelector('input[name="single-map"][value="custom"]');
+    if (radio) radio.checked = true;
+    alert('Custom map saved! Select "Custom Map" and start your game.');
+}
+
+function previewSelectedMap(context) {
+    let mapName;
+    if (context === 'single') {
+        mapName = document.querySelector('input[name="single-map"]:checked')?.value || 'classic';
+    } else if (context === 'local') {
+        mapName = document.querySelector('input[name="local-map"]:checked')?.value || 'classic';
+    } else {
+        mapName = document.querySelector('input[name="multi-map"]:checked')?.value || 'classic';
+    }
+
+    const rows = buildRows(mapName);
+    renderMapPreview(rows);
+    document.getElementById('mapPreviewModal').classList.add('show');
+}
+
+function renderMapPreview(rows) {
+    const board = document.getElementById('mapPreviewBoard');
+    board.innerHTML = '';
+    const rowNums = Object.keys(rows).map(Number).sort((a, b) => a - b);
+    for (const rowNum of rowNums) {
+        const rowDiv = document.createElement('div');
+        rowDiv.className = 'row';
+        const label = document.createElement('div');
+        label.className = 'row-label';
+        label.textContent = rowNum;
+        rowDiv.appendChild(label);
+        const circlesDiv = document.createElement('div');
+        circlesDiv.className = 'circles';
+        for (let i = 0; i < rows[rowNum].length; i++) {
+            const circle = document.createElement('div');
+            circle.className = 'circle';
+            if (rows[rowNum][i] === 1) {
+                circle.classList.add('removed');
+            }
+            circlesDiv.appendChild(circle);
+        }
+        rowDiv.appendChild(circlesDiv);
+        board.appendChild(rowDiv);
+    }
+}
+
+function closeMapPreview() {
+    document.getElementById('mapPreviewModal').classList.remove('show');
+}
+
+// ============ TUTORIAL ============
+const TUTORIALS = {
+    basics: {
+        title: '📖 Basics',
+        unlockWins: 0,
+        steps: [
+            {
+                title: 'Select circles',
+                desc: 'Click circles to select them. You can only select from <strong>one row</strong> at a time. Try selecting any circle.',
+                map: { 1: [0, 0, 0], 2: [0, 0, 0, 0] },
+                validate: (rows, r, pos) => pos.length >= 1,
+                successMsg: 'Good! You selected circles. ✅'
+            },
+            {
+                title: 'Take a whole row',
+                desc: 'Select <strong>all 3 circles</strong> in Row 1 and submit.',
+                map: { 1: [0, 0, 0] },
+                validate: (rows, r, pos) => r === 1 && pos.length === 3,
+                successMsg: 'You cleared the row! ✅'
+            },
+            {
+                title: 'Take part of a row',
+                desc: 'You can take any <strong>contiguous group</strong>. Take exactly <strong>2</strong> circles from Row 1.',
+                map: { 1: [0, 0, 0, 0, 0] },
+                validate: (rows, r, pos) => r === 1 && pos.length === 2,
+                successMsg: 'Partial takes work! ✅'
+            },
+            {
+                title: 'The losing rule',
+                desc: 'The player who takes the <strong>last circle loses</strong>. Leave exactly 1 circle remaining — take 2 from this row of 3.',
+                map: { 1: [0, 0, 0] },
+                validate: (rows, r, pos) => pos.length === 2,
+                successMsg: 'Now your opponent is forced to take the last one! ✅'
+            },
+            {
+                title: 'Beat the computer',
+                desc: 'Play a full game vs Easy AI on Classic. <strong>Remember: last circle = you lose!</strong>',
+                map: null,
+                validate: null,
+                successMsg: "You beat the AI! You're ready. 🎉"
+            }
+        ]
+    },
+    doubles: {
+        title: '🎯 Doubles',
+        unlockWins: 3,
+        steps: [
+            {
+                title: 'Take exactly 2 — three times',
+                desc: 'In Doubles mode, taking <strong>exactly 2</strong> circles keeps your turn! This board has rows of 4 and 3. Take exactly 2 circles <strong>three times in a row</strong> to clear most of the board.',
+                map: { 1: [0, 0, 0, 0], 2: [0, 0, 0] },
+                validate: (rows, r, pos) => pos.length === 2,
+                successMsg: 'Doubles! You keep your turn. ✅',
+                repeatCount: 3,
+                repeatMsg: ['First doubles! Keep going...', 'Second doubles! One more...', 'Three doubles in a row! ✅']
+            },
+            {
+                title: 'Try it out!',
+                desc: null,
+                suggest: { difficulty: 'easy', turnOrder: 'player-first', modes: { doublesMode: true } }
+            }
+        ]
+    },
+    dice: {
+        title: '🎲 Dice',
+        unlockWins: 6,
+        steps: [
+            {
+                title: 'Limited by the die',
+                desc: 'The die rolled a <strong>3</strong>. You can take at most 3 circles this turn. Select exactly <strong>3</strong> from this row of 5.',
+                map: { 1: [0, 0, 0, 0, 0] },
+                validate: (rows, r, pos) => pos.length === 3,
+                successMsg: 'You used the full roll! In a real game, the die is random (1–5). ✅',
+                diceCap: 3
+            },
+            {
+                title: 'Try it out!',
+                desc: null,
+                suggest: { difficulty: 'easy', turnOrder: 'player-first', modes: { diceMode: true } }
+            }
+        ]
+    },
+    armour: {
+        title: '🔴 Armour',
+        unlockWins: 10,
+        steps: [
+            {
+                title: 'Hit it twice',
+                desc: 'The red circle is <strong>armoured</strong>. Select it and submit — it turns orange (damaged). Then select it again and submit to remove it.',
+                map: { 1: [0, 0, 0] },
+                armourSetup: { '1-1': 2 },
+                validate: (rows, r, pos) => {
+                    // Pass when the armoured circle is fully removed
+                    return rows[1][1] === 1;
+                },
+                successMsg: 'Two hits to remove! Armoured circles add strategy. ✅',
+                multiSubmit: true
+            },
+            {
+                title: 'Try it out!',
+                desc: null,
+                suggest: { difficulty: 'easy', turnOrder: 'player-first', modes: { armourMode: true } }
+            }
+        ]
+    },
+    portal: {
+        title: '🌀 Portals',
+        unlockWins: 12,
+        steps: [
+            {
+                title: 'Linked circles',
+                desc: 'The two circles with <strong>purple rings</strong> are portals — taking one takes the other! Take one of the portal circles (not the plain one).',
+                map: { 1: [0], 2: [0, 0] },
+                portalSetup: [{ a: '1-0', b: '2-0' }],
+                validate: (rows, r, pos) => {
+                    // Pass when both portal circles are removed
+                    return rows[1][0] === 1 && rows[2][0] === 1;
+                },
+                successMsg: 'Both portals removed at once! ✅'
+            },
+            {
+                title: 'Avoid the kill circle',
+                desc: 'The <strong>black/red circle</strong> is a kill circle — take it and you <strong>instantly lose</strong>. Take the safe circle instead.',
+                map: { 1: [0], 2: [0, 0] },
+                killSetup: ['1-0'],
+                validate: (rows, r, pos) => {
+                    // Pass when they take from row 2 (not the kill circle)
+                    return r === 2 && rows[1][0] === 0;
+                },
+                successMsg: 'Smart! You avoided the kill circle. ✅'
+            },
+            {
+                title: 'Try it out!',
+                desc: null,
+                suggest: { difficulty: 'easy', turnOrder: 'player-first', modes: { portalMode: true } }
+            }
+        ]
+    },
+    sand: {
+        title: '🏜️ Sand',
+        unlockWins: 15,
+        steps: [
+            {
+                title: 'Watch them fall',
+                desc: 'Take the <strong>middle circle</strong> (position 1) from Row 2. Watch the circle above fall down!',
+                map: { 1: [0], 2: [0, 0] , 3: [0, 0, 0] },
+                sandEnabled: true,
+                validate: (rows, r, pos) => {
+                    // Pass when they take from row 2 position 0 (the left one, index 0-based)
+                    // Actually: take the middle of row 3 to show row 2 falling
+                    return r === 3 && pos.includes(1);
+                },
+                successMsg: 'The circle above fell down! Sand mode reshuffles the board. ✅'
+            },
+            {
+                title: 'Try it out!',
+                desc: null,
+                suggest: { difficulty: 'easy', turnOrder: 'player-first', modes: { sandMode: true } }
+            }
+        ]
+    },
+    cascade: {
+        title: '⚡ Cascade',
+        unlockWins: 20,
+        steps: [
+            {
+                title: 'Column removal',
+                desc: 'Take the <strong>entire bottom row</strong> (all 3 circles in Row 3). Then pick <strong>Leftmost</strong> — it will also remove position 1 from rows above!',
+                map: { 1: [0], 2: [0, 0], 3: [0, 0, 0] },
+                cascadeEnabled: true,
+                validate: (rows, r, pos) => {
+                    return r === 3 && pos.length === 3;
+                },
+                successMsg: 'The cascade removed circles above! Powerful move. ✅'
+            },
+            {
+                title: 'Try it out!',
+                desc: null,
+                suggest: { difficulty: 'easy', turnOrder: 'player-first', modes: { cascadeMode: true } }
+            }
+        ]
+    }
+};
+
+let tutorialStep = 0;
+let tutorialLastRow = null;
+let tutorialLastPositions = [];
+let tutorialActive = false;
+let currentTutorialId = 'basics';
+let seenTutorials = new Set();
+
+function loadSeenTutorials() {
+    try {
+        const saved = localStorage.getItem('circleGameSeenTutorials');
+        if (saved) seenTutorials = new Set(JSON.parse(saved));
+    } catch (e) {}
+}
+
+function markTutorialSeen(id) {
+    seenTutorials.add(id);
+    localStorage.setItem('circleGameSeenTutorials', JSON.stringify([...seenTutorials]));
+    stopTutorialBlink();
+}
+
+function getAvailableTutorials() {
+    const wins = gameState.playerLevel || 0;
+    return Object.entries(TUTORIALS)
+        .filter(([id, t]) => wins >= t.unlockWins)
+        .map(([id, t]) => ({ id, ...t }));
+}
+
+function hasUnseenTutorial() {
+    const available = getAvailableTutorials();
+    return available.some(t => !seenTutorials.has(t.id));
+}
+
+function startTutorialBlink() {
+    const btn = document.getElementById('tutorialBtn');
+    if (btn && hasUnseenTutorial()) {
+        btn.classList.add('tut-blink');
+    }
+}
+
+function stopTutorialBlink() {
+    const btn = document.getElementById('tutorialBtn');
+    if (btn) btn.classList.remove('tut-blink');
+}
+
+function showTutorial() {
+    document.getElementById('mainMenuScreen').classList.add('hidden');
+    document.getElementById('tutorialScreen').classList.remove('hidden');
+    renderTutorialMenu();
+}
+
+function exitTutorial() {
+    tutorialActive = false;
+    document.getElementById('tutorialScreen').classList.add('hidden');
+    document.getElementById('mainMenuScreen').classList.remove('hidden');
+}
+
+function renderTutorialMenu() {
+    const area = document.getElementById('tutorialPlayArea');
+    const grid = document.getElementById('tutorialGrid');
+    grid.innerHTML = '';
+    area.innerHTML = '';
+
+    const available = getAvailableTutorials();
+
+    available.forEach(t => {
+        const card = document.createElement('div');
+        const seen = seenTutorials.has(t.id);
+        card.className = 'tut-card' + (seen ? ' tut-done' : ' tut-active');
+        card.style.cursor = 'pointer';
+        card.onclick = () => startTutorialSection(t.id);
+
+        const badge = document.createElement('div');
+        badge.className = 'tut-badge';
+        badge.textContent = seen ? '✓' : '●';
+
+        const title = document.createElement('div');
+        title.className = 'tut-card-title';
+        title.textContent = t.title;
+
+        if (!seen) {
+            const newTag = document.createElement('span');
+            newTag.style.cssText = 'display:inline-block;background:#e74c3c;color:white;font-size:9px;padding:2px 5px;border-radius:4px;margin-top:4px;';
+            newTag.textContent = 'NEW';
+            card.appendChild(badge);
+            card.appendChild(title);
+            card.appendChild(newTag);
+        } else {
+            card.appendChild(badge);
+            card.appendChild(title);
+        }
+
+        grid.appendChild(card);
+    });
+
+    area.innerHTML = '<p style="text-align:center;color:#888;margin-top:16px;">Click a tutorial above to start it.</p>';
+}
+
+function startTutorialSection(id) {
+    currentTutorialId = id;
+    tutorialStep = 0;
+    tutorialActive = (id === 'basics');
+    markTutorialSeen(id);
+    renderTutorialProgress();
+}
+
+function renderTutorialProgress() {
+    const tut = TUTORIALS[currentTutorialId];
+    const grid = document.getElementById('tutorialGrid');
+    grid.innerHTML = '';
+
+    // Show step indicators
+    tut.steps.forEach((step, idx) => {
+        const card = document.createElement('div');
+        card.className = 'tut-card' + (idx === tutorialStep ? ' tut-active' : '') + (idx < tutorialStep ? ' tut-done' : '') + (idx > tutorialStep ? ' tut-locked' : '');
+        const badge = document.createElement('div');
+        badge.className = 'tut-badge';
+        badge.textContent = idx < tutorialStep ? '✓' : `${idx + 1}`;
+        card.appendChild(badge);
+        grid.appendChild(card);
+    });
+
+    renderTutorialStep();
+}
+
+function renderTutorialStep() {
+    const tut = TUTORIALS[currentTutorialId];
+    const step = tut.steps[tutorialStep];
+    const area = document.getElementById('tutorialPlayArea');
+    area.innerHTML = '';
+
+    // "Suggest a game" step — no interactive board, just a launch button
+    if (step.suggest) {
+        const h = document.createElement('h3');
+        h.style.cssText = 'margin-bottom:10px; color:#333;';
+        h.textContent = 'Try it out!';
+        area.appendChild(h);
+
+        const desc = document.createElement('p');
+        desc.style.cssText = 'margin-bottom:18px; color:#555; font-size:15px; line-height:1.5;';
+        desc.textContent = 'Ready to play a real game with this mode? We\'ll set it up for you.';
+        area.appendChild(desc);
+
+        const launchBtn = document.createElement('button');
+        launchBtn.textContent = '▶ Play with this mode';
+        launchBtn.style.cssText = 'background:#27ae60; color:white; display:block; margin:0 auto; padding:14px 28px; font-size:16px;';
+        launchBtn.onclick = () => {
+            const s = step.suggest;
+            gameState.playerName = currentUser ? currentUser.username : 'Player';
+            gameState.difficulty = s.difficulty || 'easy';
+            gameState.turnOrder = s.turnOrder || 'player-first';
+            gameState.map = 'classic';
+            gameState.diceMode = !!s.modes.diceMode;
+            gameState.doublesMode = !!s.modes.doublesMode;
+            gameState.armourMode = !!s.modes.armourMode;
+            gameState.sandMode = !!s.modes.sandMode;
+            gameState.cascadeMode = !!s.modes.cascadeMode;
+            gameState.portalMode = !!s.modes.portalMode;
+            gameMode = 'single';
+            tutorialActive = false;
+            initGame();
+            document.getElementById('tutorialScreen').classList.add('hidden');
+            document.getElementById('gameScreen').classList.remove('hidden');
+        };
+        area.appendChild(launchBtn);
+
+        const skipBtn = document.createElement('button');
+        skipBtn.textContent = 'Back to tutorials';
+        skipBtn.style.cssText = 'background:#95a5a6; color:white; display:block; margin:10px auto 0; padding:10px 20px; font-size:14px;';
+        skipBtn.onclick = () => renderTutorialMenu();
+        area.appendChild(skipBtn);
+        return;
+    }
+
+    const h = document.createElement('h3');
+    h.style.cssText = 'margin-bottom:10px; color:#333;';
+    h.textContent = step.title;
+    area.appendChild(h);
+
+    const desc = document.createElement('p');
+    desc.style.cssText = 'margin-bottom:18px; color:#555; font-size:15px; line-height:1.5;';
+    desc.innerHTML = step.desc;
+    area.appendChild(desc);
+
+    // Dice cap display for dice tutorial
+    if (step.diceCap) {
+        const diceInfo = document.createElement('div');
+        diceInfo.style.cssText = 'margin-bottom:14px; padding:10px; background:#fff8e1; border:2px solid #ffb300; border-radius:8px; font-size:16px; font-weight:bold; text-align:center;';
+        diceInfo.textContent = `🎲 Max take this turn: ${step.diceCap}`;
+        area.appendChild(diceInfo);
+    }
+
+    const msg = document.createElement('div');
+    msg.id = 'tutorialMsg';
+    msg.style.cssText = 'min-height:28px; margin-bottom:10px; font-weight:bold; color:#27ae60; text-align:center; font-size:15px;';
+    area.appendChild(msg);
+
+    if (step.map && step.validate) {
+        startTutorialMiniGame(step, area);
+    } else if (step.map === null && step.validate === null && currentTutorialId === 'basics' && tutorialStep === tut.steps.length - 1) {
+        startTutorialFullGame(area);
+    } else {
+        const btn = document.createElement('button');
+        btn.textContent = 'Got it →';
+        btn.style.cssText = 'background:#667eea; color:white; display:block; margin:0 auto; padding:12px 24px;';
+        btn.onclick = () => advanceTutorial();
+        area.appendChild(btn);
+    }
+}
+
+function startTutorialMiniGame(step, area) {
+    const miniRows = JSON.parse(JSON.stringify(step.map));
+    let miniSelected = {};
+    let miniArmour = step.armourSetup ? JSON.parse(JSON.stringify(step.armourSetup)) : {};
+    let repeatsDone = 0;
+    tutorialLastRow = null;
+    tutorialLastPositions = [];
+
+    function renderMini() {
+        const boardEl = document.getElementById('tutorialMiniBoard');
+        if (!boardEl) return;
+        boardEl.innerHTML = '';
+        const rowNums = Object.keys(miniRows).map(Number).sort((a, b) => a - b);
+        for (const rowNum of rowNums) {
+            const rowDiv = document.createElement('div');
+            rowDiv.className = 'row';
+            const label = document.createElement('div');
+            label.className = 'row-label';
+            label.textContent = rowNum;
+            rowDiv.appendChild(label);
+            const circlesDiv = document.createElement('div');
+            circlesDiv.className = 'circles';
+            miniRows[rowNum].forEach((val, i) => {
+                const c = document.createElement('div');
+                c.className = 'circle';
+                const key = `${rowNum}-${i}`;
+                if (val === 1) {
+                    c.classList.add('removed');
+                } else if (miniSelected[key]) {
+                    c.classList.add('selected');
+                } else if (step.killSetup && step.killSetup.includes(key)) {
+                    c.classList.add('kill-circle');
+                } else if (miniArmour[key] === 2) {
+                    c.classList.add('armoured');
+                } else if (miniArmour[key] === 1) {
+                    c.classList.add('damaged');
+                }
+                // Portal visual
+                if (step.portalSetup) {
+                    for (let pi = 0; pi < step.portalSetup.length; pi++) {
+                        const p = step.portalSetup[pi];
+                        if ((p.a === key || p.b === key) && val === 0) {
+                            c.style.boxShadow = `0 0 0 3px ${PORTAL_COLORS[pi % PORTAL_COLORS.length]}`;
+                        }
+                    }
+                }
+                c.onclick = () => {
+                    if (val === 1) return;
+                    const selRows = new Set(Object.keys(miniSelected).map(k => k.split('-')[0]));
+                    if (selRows.size > 0 && !selRows.has(String(rowNum))) miniSelected = {};
+                    if (miniSelected[key]) { delete miniSelected[key]; }
+                    else { miniSelected[key] = true; }
+                    renderMini();
+                };
+                circlesDiv.appendChild(c);
+            });
+            rowDiv.appendChild(circlesDiv);
+            boardEl.appendChild(rowDiv);
+        }
+    }
+
+    const boardEl = document.createElement('div');
+    boardEl.id = 'tutorialMiniBoard';
+    boardEl.className = 'board';
+    boardEl.style.marginBottom = '16px';
+    area.appendChild(boardEl);
+    renderMini();
+
+    const submitBtn = document.createElement('button');
+    submitBtn.textContent = 'Submit Move';
+    submitBtn.style.cssText = 'background:#667eea; color:white; margin-right:8px;';
+    submitBtn.onclick = () => {
+        const keys = Object.keys(miniSelected);
+        if (keys.length === 0) { alert('Select at least one circle.'); return; }
+        const row = parseInt(keys[0].split('-')[0]);
+        const positions = keys.map(k => parseInt(k.split('-')[1])).sort((a, b) => a - b);
+        for (let i = 0; i < positions.length - 1; i++) {
+            if (positions[i + 1] !== positions[i] + 1) { alert('Circles must be contiguous.'); return; }
+        }
+
+        // Dice cap enforcement
+        if (step.diceCap && positions.length > step.diceCap) {
+            alert(`🎲 The die rolled ${step.diceCap}. Max ${step.diceCap} circles.`);
+            return;
+        }
+
+        // Kill circle check
+        if (step.killSetup) {
+            for (const p of positions) {
+                if (step.killSetup.includes(`${row}-${p}`)) {
+                    document.getElementById('tutorialMsg').textContent = '💀 You took the kill circle! Try again.';
+                    document.getElementById('tutorialMsg').style.color = '#e74c3c';
+                    // Reset
+                    Object.keys(step.map).forEach(r => { miniRows[r] = [...step.map[r]]; });
+                    miniSelected = {};
+                    setTimeout(() => {
+                        document.getElementById('tutorialMsg').textContent = '';
+                        document.getElementById('tutorialMsg').style.color = '#27ae60';
+                        renderMini();
+                    }, 1200);
+                    return;
+                }
+            }
+        }
+
+        // Apply move (with armour handling)
+        positions.forEach(p => {
+            const key = `${row}-${p}`;
+            if (miniArmour[key]) {
+                miniArmour[key]--;
+                if (miniArmour[key] <= 0) {
+                    delete miniArmour[key];
+                    miniRows[row][p] = 1;
+                }
+            } else {
+                miniRows[row][p] = 1;
+            }
+            // Portal: also remove partner
+            if (step.portalSetup) {
+                for (const portal of step.portalSetup) {
+                    let partner = null;
+                    if (portal.a === key) partner = portal.b;
+                    if (portal.b === key) partner = portal.a;
+                    if (partner) {
+                        const pr = parseInt(partner.split('-')[0]);
+                        const pp = parseInt(partner.split('-')[1]);
+                        if (miniRows[pr] && miniRows[pr][pp] === 0) {
+                            miniRows[pr][pp] = 1;
+                        }
+                    }
+                }
+            }
+        });
+
+        // Sand gravity in tutorial
+        if (step.sandEnabled) {
+            applyTutorialSandGravity(miniRows);
+        }
+
+        miniSelected = {};
+        tutorialLastRow = row;
+        tutorialLastPositions = positions;
+        renderMini();
+
+        // Repeat-count steps (doubles)
+        if (step.repeatCount) {
+            repeatsDone++;
+            if (step.validate(miniRows, tutorialLastRow, tutorialLastPositions)) {
+                if (repeatsDone >= step.repeatCount) {
+                    document.getElementById('tutorialMsg').textContent = step.repeatMsg[step.repeatCount - 1] || step.successMsg;
+                    submitBtn.disabled = true;
+                    resetBtn.disabled = true;
+                    setTimeout(() => advanceTutorial(), 1200);
+                } else {
+                    document.getElementById('tutorialMsg').textContent = step.repeatMsg[repeatsDone - 1] || `${repeatsDone}/${step.repeatCount}...`;
+                }
+            }
+            return;
+        }
+
+        // Normal validation
+        if (step.validate(miniRows, tutorialLastRow, tutorialLastPositions)) {
+            document.getElementById('tutorialMsg').textContent = step.successMsg;
+            submitBtn.disabled = true;
+            resetBtn.disabled = true;
+            setTimeout(() => advanceTutorial(), 1200);
+        }
+    };
+
+    const resetBtn = document.createElement('button');
+    resetBtn.textContent = 'Reset';
+    resetBtn.style.cssText = 'background:#95a5a6; color:white;';
+    resetBtn.onclick = () => {
+        Object.keys(step.map).forEach(r => { miniRows[r] = [...step.map[r]]; });
+        miniSelected = {};
+        miniArmour = step.armourSetup ? JSON.parse(JSON.stringify(step.armourSetup)) : {};
+        repeatsDone = 0;
+        document.getElementById('tutorialMsg').textContent = '';
+        document.getElementById('tutorialMsg').style.color = '#27ae60';
+        renderMini();
+    };
+
+    const btnRow = document.createElement('div');
+    btnRow.style.cssText = 'display:flex; gap:10px; justify-content:center; margin-top:8px;';
+    btnRow.appendChild(submitBtn);
+    btnRow.appendChild(resetBtn);
+    area.appendChild(btnRow);
+}
+
+// Simple sand gravity for tutorial mini-boards
+function applyTutorialSandGravity(miniRows) {
+    const rowNums = Object.keys(miniRows).map(Number).sort((a, b) => a - b);
+    let changed = true;
+    let iter = 0;
+    while (changed && iter < 20) {
+        changed = false;
+        iter++;
+        for (let ri = 0; ri < rowNums.length - 1; ri++) {
+            const r = rowNums[ri];
+            const belowR = rowNums[ri + 1];
+            const currentRow = miniRows[r];
+            const belowRow = miniRows[belowR];
+            for (let p = 0; p < currentRow.length; p++) {
+                if (currentRow[p] !== 0) continue;
+                const hasSupport =
+                    (p < belowRow.length && belowRow[p] === 0) ||
+                    (p + 1 < belowRow.length && belowRow[p + 1] === 0);
+                if (hasSupport) continue;
+                const leftOpen = (p < belowRow.length && belowRow[p] === 1);
+                const rightOpen = (p + 1 < belowRow.length && belowRow[p + 1] === 1);
+                let landPos = -1;
+                if (leftOpen && rightOpen) landPos = Math.random() < 0.5 ? p : p + 1;
+                else if (leftOpen) landPos = p;
+                else if (rightOpen) landPos = p + 1;
+                if (landPos >= 0) {
+                    currentRow[p] = 1;
+                    belowRow[landPos] = 0;
+                    changed = true;
+                }
+            }
+        }
+    }
+}
+
+function startTutorialFullGame(area) {
+    const note = document.createElement('p');
+    note.style.cssText = 'color:#667eea; font-weight:bold; text-align:center; margin-bottom:14px;';
+    note.textContent = 'Classic map vs Easy AI — you go first';
+    area.appendChild(note);
+
+    const launchBtn = document.createElement('button');
+    launchBtn.textContent = '▶ Start the game';
+    launchBtn.style.cssText = 'background:#667eea; color:white; display:block; margin:0 auto;';
+    launchBtn.onclick = () => {
+        gameState.playerName = currentUser ? currentUser.username : 'Player';
+        gameState.difficulty = 'easy';
+        gameState.turnOrder = 'player-first';
+        gameState.map = 'classic';
+        gameState.diceMode = false;
+        gameState.armourMode = false;
+        gameState.cascadeMode = false;
+        gameState.sandMode = false;
+        gameState.portalMode = false;
+        gameState.doublesMode = false;
+        gameMode = 'single';
+        tutorialActive = true;
+        initGame();
+        document.getElementById('tutorialScreen').classList.add('hidden');
+        document.getElementById('gameScreen').classList.remove('hidden');
+        document.getElementById('mainMenuBtn').onclick = () => {
+            tutorialActive = false;
+            returnToMainMenu();
+            document.getElementById('mainMenuBtn').onclick = returnToMainMenu;
+        };
+    };
+    area.appendChild(launchBtn);
+}
+
+function advanceTutorial() {
+    const tut = TUTORIALS[currentTutorialId];
+    tutorialStep++;
+    if (tutorialStep >= tut.steps.length) {
+        // Section complete
+        if (currentTutorialId === 'basics') {
+            document.getElementById('tutorialScreen').classList.add('hidden');
+            document.getElementById('mainMenuScreen').classList.remove('hidden');
+            tutorialActive = false;
+            alert("Tutorial complete! You're ready to play. 🎉");
+        } else {
+            // Return to tutorial menu
+            renderTutorialMenu();
+        }
+        return;
+    }
+    renderTutorialProgress();
+}
+
+function checkTutorialWin() {
+    if (!tutorialActive || currentTutorialId !== 'basics') return false;
+    const tut = TUTORIALS.basics;
+    return tutorialStep === tut.steps.length - 1;
+}
+
+function onTutorialWin() {
+    tutorialActive = false;
+    unlockAchievement('beginning');
+    document.getElementById('gameScreen').classList.add('hidden');
+    document.getElementById('tutorialScreen').classList.remove('hidden');
+    document.getElementById('mainMenuBtn').onclick = returnToMainMenu;
+    tutorialStep = TUTORIALS.basics.steps.length;
+    renderTutorialMenu();
+    setTimeout(() => {
+        document.getElementById('tutorialScreen').classList.add('hidden');
+        document.getElementById('mainMenuScreen').classList.remove('hidden');
+        alert("Tutorial complete! You're ready to play. 🎉");
+    }, 1500);
+}
+// ============ ACHIEVEMENTS ============
+const ACHIEVEMENT_DEFS = [
+    { id: 'beginning',       name: 'Beginning',              desc: 'Finish the tutorial' },
+    { id: 'novice',          name: 'Novice',                 desc: 'Beat the Medium bot' },
+    { id: 'patterner',       name: 'Patterner',              desc: 'Beat the Hard bot' },
+    { id: 'cheater',         name: 'Cheater',                desc: 'Beat the Hard bot when it starts first', secret: true },
+    { id: 'dedicated',       name: 'Dedicated',              desc: 'Beat the Hard bot 20 times', secret: true },
+    { id: 'friendly',        name: 'Friendly',               desc: 'Play an online multiplayer match' },
+    { id: 'close',           name: 'Getting a Little Close', desc: 'Play a match on one device' },
+    { id: 'multiplayer_guy', name: 'Multiplayer Guy',        desc: 'Win 5 online multiplayer matches' },
+    { id: 'doubles',         name: 'Doubles',                desc: 'Unlock Doubles mode (3+ wins)' },
+    { id: 'dicey',           name: 'Dicey',                  desc: 'Unlock Dice mode (6+ wins)' },
+    { id: 'tanky',           name: 'Tanky',                  desc: 'Unlock Armoured Circles (10+ wins)' },
+    { id: 'portals',         name: "Now You're Thinking With...", desc: 'Unlock Portal mode (12+ wins)' },
+    { id: 'slippery',        name: 'Slippery',               desc: 'Unlock Sand mode (15+ wins)' },
+    { id: 'demoman',         name: 'Demoman',                desc: 'Unlock Cascade mode (20+ wins)' },
+    { id: 'oops',            name: 'Oops',                   desc: 'Play against VIP', secret: true },
+    { id: 'wolf_slayer',     name: 'Wolf Slayer',             desc: 'Beat L0n3W01f in multiplayer' },
+    { id: 'crazy_taxi',      name: 'CrAZy tAxi',             desc: 'Win with ALL modifiers on at once' },
+    { id: 'tough_luck',      name: 'Tough Luck',             desc: 'Lose to a kill circle' },
+    { id: 'slayer',          name: 'Slayer',                  desc: 'Take 6 circles in one move, 3 times' },
+    { id: 'golden',          name: 'Golden',                 desc: '50+ total wins', hidden: true },
+    { id: 'secret_skin',     name: '???',                    desc: 'A secret achievement...', hidden: true },
+];
+
+let unlockedAchievements = new Set();
+
+async function loadAchievements(name) {
+    if (!name) return;
+    try {
+        const res = await fetch(`/achievements?name=${encodeURIComponent(name)}`);
+        const data = await res.json();
+        const achievements = data.achievements || [];
+        unlockedAchievements = new Set(achievements);
+
+        // Restore unlocked themes from server-side data
+        const serverThemes = achievements
+            .filter(a => a.startsWith('theme_'))
+            .map(a => a.replace('theme_', ''));
+        const localThemes = getUnlockedThemes();
+        let changed = false;
+        for (const t of serverThemes) {
+            if (!localThemes.includes(t)) {
+                localThemes.push(t);
+                changed = true;
+            }
+        }
+        if (changed) {
+            localStorage.setItem('circleGameUnlockedThemes', JSON.stringify(localThemes));
+        }
+        renderUnlockedThemes();
+    } catch (e) { console.error('Failed to load achievements:', e); }
+}
+
+async function unlockAchievement(id) {
+    const name = gameState.playerName;
+    if (!name || unlockedAchievements.has(id)) return;
+    unlockedAchievements.add(id);
+    try {
+        await fetch('/achievements/unlock', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, achievement: id })
+        });
+    } catch (e) { console.error('Failed to unlock achievement:', e); }
+    showAchievementToast(id);
+
+    // Auto-unlock themes tied to achievements
+    if (id === 'oops') saveUnlockedTheme('ripvip');
+    if (id === 'wolf_slayer') saveUnlockedTheme('wolf');
+    if (id === 'golden') saveUnlockedTheme('golden');
+    if (id === 'secret_skin') saveUnlockedTheme('secret');
+    renderUnlockedThemes();
+}
+
+function showAchievementToast(id) {
+    const def = ACHIEVEMENT_DEFS.find(a => a.id === id);
+    if (!def) return;
+    const toast = document.createElement('div');
+    toast.style.cssText = [
+        'position:fixed', 'bottom:24px', 'left:50%', 'transform:translateX(-50%)',
+        'background:#222', 'color:white', 'padding:12px 22px', 'border-radius:12px',
+        'font-size:15px', 'font-weight:bold', 'z-index:9999',
+        'box-shadow:0 4px 20px rgba(0,0,0,0.4)',
+        'display:flex', 'align-items:center', 'gap:10px',
+        'transition:opacity 0.3s'
+    ].join(';');
+    toast.innerHTML = `<div style="width:28px;height:28px;border-radius:50%;background:#667eea;border:2px solid white;flex-shrink:0;display:flex;align-items:center;justify-content:center;"><span style="color:white;font-size:12px;">✓</span></div><div><div style="font-size:11px;opacity:0.7;text-transform:uppercase;letter-spacing:1px">Achievement Unlocked</div><div>${def.name}</div></div>`;
+    document.body.appendChild(toast);
+    setTimeout(() => { toast.style.opacity = '0'; setTimeout(() => toast.remove(), 300); }, 3200);
+}
+
+async function checkWinAchievements(name) {
+    if (!name) return;
+    try {
+        const res = await fetch('/scoreboard');
+        const board = await res.json();
+
+        let totalWins = 0;
+        for (const diff of ['easy', 'medium', 'hard']) {
+            const e = (board.singlePlayer[diff] || []).find(e => e.name.toLowerCase() === name.toLowerCase());
+            if (e) totalWins += e.wins;
+        }
+        const mEntry = (board.multiplayer || []).find(e => e.name.toLowerCase() === name.toLowerCase());
+        if (mEntry) totalWins += mEntry.wins;
+
+        if (totalWins >= 3)  unlockAchievement('doubles');
+        if (totalWins >= 6)  unlockAchievement('dicey');
+        if (totalWins >= 10) unlockAchievement('tanky');
+        if (totalWins >= 12) unlockAchievement('portals');
+        if (totalWins >= 15) unlockAchievement('slippery');
+        if (totalWins >= 20) unlockAchievement('demoman');
+        if (totalWins >= 50) { unlockAchievement('golden'); saveUnlockedTheme('golden'); }
+
+        const medE  = (board.singlePlayer.medium || []).find(e => e.name.toLowerCase() === name.toLowerCase());
+        const hardE = (board.singlePlayer.hard   || []).find(e => e.name.toLowerCase() === name.toLowerCase());
+        if (medE  && medE.wins  >= 1)  unlockAchievement('novice');
+        if (hardE && hardE.wins >= 1)  unlockAchievement('patterner');
+        if (hardE && hardE.wins >= 20) unlockAchievement('dedicated');
+
+        if (mEntry && mEntry.gamesPlayed >= 1) unlockAchievement('friendly');
+        if (mEntry && mEntry.wins >= 5)        unlockAchievement('multiplayer_guy');
+
+        // Check if player has beaten L0n3W01f (L0n3W01f has losses = gamesPlayed - wins)
+        const wolfEntry = (board.multiplayer || []).find(e => e.name.toLowerCase() === 'l0n3w01f');
+        if (wolfEntry && wolfEntry.gamesPlayed > wolfEntry.wins && name.toLowerCase() !== 'l0n3w01f') {
+            // If L0n3W01f has losses and this player has multiplayer wins, they might have beaten them
+            // More accurate: just check if this player has any multiplayer wins while L0n3W01f exists
+            if (mEntry && mEntry.wins >= 1) unlockAchievement('wolf_slayer');
+        }
+    } catch (e) { console.error('Failed to check win achievements:', e); }
+}
+
+// ============ PASSWORD SYSTEM ============
+let pwdSequence = [];
+let pwdMode = null;
+let pwdResolve = null;
+let pwdName = '';
+
+function openPasswordModal(name, mode) {
+    pwdName = name;
+    pwdMode = mode;
+    pwdSequence = [];
+    console.log('[auth] openPasswordModal', { name, mode });
+    document.getElementById('pwdTitle').textContent =
+        mode === 'set' ? '🔒 Set a Password' : '🔑 Enter Password';
+    document.getElementById('pwdSubtitle').textContent =
+        mode === 'set'
+            ? `Choose a button sequence for "${name}" (3–9 presses)`
+            : `Enter the password for "${name}"`;
+    document.getElementById('pwdError').textContent = '';
+    document.getElementById('pwdDots').textContent = '';
+    document.getElementById('passwordModal').classList.add('show');
+    return new Promise(resolve => { pwdResolve = resolve; });
+}
+
+function pwdPress(num) {
+    if (pwdSequence.length >= 15) return;
+    pwdSequence.push(num);
+    document.getElementById('pwdDots').textContent = '● '.repeat(pwdSequence.length).trim();
+    const circles = document.querySelectorAll('#pwdTriangle .circle');
+    const el = circles[num - 1];
+    if (el) {
+        el.classList.add('pwd-pressed');
+        setTimeout(() => el.classList.remove('pwd-pressed'), 250);
+    }
+}
+
+function pwdClear() {
+    pwdSequence = [];
+    document.getElementById('pwdDots').textContent = '';
+    document.getElementById('pwdError').textContent = '';
+}
+
+async function pwdSubmit() {
+    if (pwdMode === 'set') {
+        if (pwdSequence.length < 3) {
+            document.getElementById('pwdError').textContent = 'Enter at least 3 buttons.';
+            return;
+        }
+        lastPwdSequence = [...pwdSequence];
+        const res = await fetch('/password/set', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: pwdName, sequence: pwdSequence })
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            document.getElementById('pwdError').textContent = err.error || 'Account already exists.';
+            pwdClear();
+            return;
+        }
+        const resolver = pwdResolve;
+        closePwdModal();
+        if (resolver) resolver(true);
+    } else {
+        if (pwdSequence.length === 0) {
+            document.getElementById('pwdError').textContent = 'Enter your password.';
+            return;
+        }
+        try {
+            lastPwdSequence = [...pwdSequence];
+            const res = await fetch('/password/verify', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: pwdName, sequence: pwdSequence })
+            });
+            const data = await res.json();
+            if (data.ok) {
+                const resolver = pwdResolve;
+                closePwdModal();
+                if (resolver) resolver(true);
+            } else {
+                document.getElementById('pwdError').textContent = 'Wrong password. Try again.';
+                pwdClear();
+            }
+        } catch (e) {
+            document.getElementById('pwdError').textContent = 'Connection error.';
+        }
+    }
+}
+
+function pwdCancel() {
+    const resolver = pwdResolve;
+    closePwdModal();
+    if (resolver) resolver(false);
+}
+
+function closePwdModal() {
+    document.getElementById('passwordModal').classList.remove('show');
+    pwdSequence = [];
+    pwdResolve = null;
+}
+
+async function authenticatePlayer(name) {
+    try {
+        const res = await fetch(`/password/exists?name=${encodeURIComponent(name)}`);
+        const data = await res.json();
+        if (data.exists) {
+            return await openPasswordModal(name, 'verify');
+        } else {
+            const wants = confirm(`Welcome, ${name}! Set a password to protect your account?`);
+            if (wants) return await openPasswordModal(name, 'set');
+            return true;
+        }
+    } catch (e) { return true; }
+}
+
+// ============ CREDITS ============
+function showCredits() {
+    document.getElementById('mainMenuScreen').classList.add('hidden');
+    document.getElementById('creditsScreen').classList.remove('hidden');
+}
+
+function closeCredits() {
+    document.getElementById('creditsScreen').classList.add('hidden');
+    document.getElementById('mainMenuScreen').classList.remove('hidden');
+}
+
+// ============ ACHIEVEMENTS MODAL ============
+async function showAchievementsModal() {
+    document.getElementById('achievementsModal').classList.add('show');
+    const container = document.getElementById('achievementsContent');
+    container.innerHTML = '<p style="text-align:center;color:#aaa;">Loading...</p>';
+
+    const name = gameState.playerName || (currentUser ? currentUser.username : '');
+    if (!name) {
+        container.innerHTML = '<p style="text-align:center;color:#aaa;">Log in to see achievements.</p>';
+        return;
+    }
+
+    try {
+        const res = await fetch(`/achievements?name=${encodeURIComponent(name)}`);
+        const data = await res.json();
+        renderAchievements(new Set(data.achievements || []), container);
+    } catch (e) {
+        container.innerHTML = '<p style="text-align:center;color:#e74c3c;">Failed to load.</p>';
+    }
+}
+
+function closeAchievementsModal() {
+    document.getElementById('achievementsModal').classList.remove('show');
+}
+
+function renderAchievements(unlockedSet, container) {
+    if (!container) container = document.getElementById('achievementsContent');
+    const name = gameState.playerName || (currentUser ? currentUser.username : '?');
+    container.innerHTML = `<p style="color:#666;margin-bottom:14px;font-size:13px;">Achievements for <strong>${name}</strong></p>`;
+    const grid = document.createElement('div');
+    grid.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:10px;';
+
+    // Track secret clicks
+    let secretClicks = new Set();
+
+    ACHIEVEMENT_DEFS.forEach(def => {
+        // Hidden achievements only show if unlocked
+        if (def.hidden && !unlockedSet.has(def.id)) return;
+
+        const unlocked = unlockedSet.has(def.id);
+        const card = document.createElement('div');
+        card.style.cssText = `
+            padding:10px 12px; border-radius:10px; border:2px solid ${unlocked ? '#667eea' : '#eee'};
+            background:${unlocked ? '#eef1ff' : '#fafafa'};
+            display:flex; align-items:center; gap:10px; cursor:default;
+        `;
+
+        // Circle icon — styled like the game circles
+        const circleIcon = document.createElement('div');
+        circleIcon.style.cssText = `
+            width:36px; height:36px; border-radius:50%; flex-shrink:0;
+            border:3px solid ${unlocked ? '#667eea' : '#ccc'};
+            background:${unlocked ? '#667eea' : 'white'};
+            display:flex; align-items:center; justify-content:center;
+            transition:all 0.2s; cursor:pointer;
+        `;
+        if (unlocked) {
+            circleIcon.innerHTML = '<span style="color:white;font-size:14px;font-weight:bold;">✓</span>';
+        }
+
+        // Secret achievement click handler
+        if (def.secret && unlocked) {
+            circleIcon.style.cursor = 'pointer';
+            circleIcon.onclick = () => {
+                secretClicks.add(def.id);
+                circleIcon.style.background = '#764ba2';
+                circleIcon.style.borderColor = '#764ba2';
+                // Check if all 3 secret ones are clicked
+                if (secretClicks.has('oops') && secretClicks.has('cheater') && secretClicks.has('dedicated')) {
+                    unlockAchievement('secret_skin');
+                    saveUnlockedTheme('secret');
+                    alert('🎉 Secret unlocked! Theme code "secret" is now available.');
+                }
+            };
+        }
+
+        const textDiv = document.createElement('div');
+        textDiv.innerHTML = `
+            <div style="font-weight:bold;font-size:13px;color:${unlocked ? '#333' : '#bbb'}">${def.name}</div>
+            <div style="font-size:11px;color:${unlocked ? '#777' : '#ccc'};margin-top:2px">${def.desc}</div>
+        `;
+
+        card.appendChild(circleIcon);
+        card.appendChild(textDiv);
+        grid.appendChild(card);
+    });
+    container.appendChild(grid);
+}
+
+// ============ THEME CODES ============
+let loadedThemes = [];
+
+function getUnlockedThemes() {
+    try {
+        return JSON.parse(localStorage.getItem('circleGameUnlockedThemes') || '["classic"]');
+    } catch (e) { return ['classic']; }
+}
+
+function saveUnlockedTheme(code) {
+    const unlocked = getUnlockedThemes();
+    if (!unlocked.includes(code)) {
+        unlocked.push(code);
+        localStorage.setItem('circleGameUnlockedThemes', JSON.stringify(unlocked));
+        // Also persist server-side as a special achievement
+        const name = gameState.playerName || (currentUser ? currentUser.username : '');
+        if (name) {
+            fetch('/achievements/unlock', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name, achievement: `theme_${code}` })
+            }).catch(() => {});
+        }
+    }
+    renderUnlockedThemes();
+}
+
+async function loadThemes() {
+    try {
+        const res = await fetch('/themes');
+        const data = await res.json();
+        loadedThemes = data.themes || [];
+    } catch (e) {
+        console.error('Failed to load themes:', e);
+    }
+}
+
+function applyThemeCode() {
+    const code = document.getElementById('themeCodeInput').value.trim().toLowerCase();
+    if (!code) return;
+
+    // Secret code: unlock all modes
+    if (code === '82662') {
+        document.getElementById('themeCodeInput').value = '';
+        // Force-show all mode options
+        const allModeIds = [
+            'doublesModeOption', 'diceModeOption', 'armourModeOption',
+            'portalModeOption', 'sandModeOption', 'cascadeModeOption',
+            'multiDoublesModeOption', 'multiDiceModeOption', 'multiArmourModeOption',
+            'multiSandModeOption', 'multiCascadeModeOption'
+        ];
+        allModeIds.forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.classList.remove('hidden');
+        });
+        alert('🔓 All modes unlocked!');
+        return;
+    }
+
+    const theme = loadedThemes.find(t => t.code.toLowerCase() === code);
+    if (theme) {
+        document.body.style.background = theme.background;
+        localStorage.setItem('circleGameTheme', code);
+        saveUnlockedTheme(code);
+        document.getElementById('themeCodeInput').value = '';
+        renderUnlockedThemes();
+        alert(`🎨 Theme applied: ${theme.name}\n${theme.description}`);
+    } else {
+        alert('Invalid code. Try again.');
+    }
+}
+
+function applyThemeByCode(code) {
+    const theme = loadedThemes.find(t => t.code.toLowerCase() === code);
+    if (theme) {
+        document.body.style.background = theme.background;
+        localStorage.setItem('circleGameTheme', code);
+        renderUnlockedThemes();
+    }
+}
+
+function applySavedTheme() {
+    const saved = localStorage.getItem('circleGameTheme');
+    if (saved && loadedThemes.length > 0) {
+        const theme = loadedThemes.find(t => t.code.toLowerCase() === saved.toLowerCase());
+        if (theme) {
+            document.body.style.background = theme.background;
+        }
+    }
+    renderUnlockedThemes();
+}
+
+function renderUnlockedThemes() {
+    const container = document.getElementById('unlockedThemes');
+    if (!container) return;
+    const unlocked = getUnlockedThemes();
+    const currentTheme = localStorage.getItem('circleGameTheme') || 'classic';
+    container.innerHTML = '';
+
+    for (const code of unlocked) {
+        const theme = loadedThemes.find(t => t.code.toLowerCase() === code);
+        if (!theme) continue;
+        const swatch = document.createElement('div');
+        swatch.className = 'theme-swatch' + (code === currentTheme ? ' active' : '');
+        swatch.style.background = theme.background;
+        swatch.title = theme.name;
+        swatch.onclick = () => applyThemeByCode(code);
+        container.appendChild(swatch);
+    }
+}
+
+// ============ SECRET MODE ============
+let _secretClicks = 0;
+let _secretTimer = null;
+function secretTitleClick() {
+    _secretClicks++;
+    clearTimeout(_secretTimer);
+    _secretTimer = setTimeout(() => { _secretClicks = 0; }, 2000);
+    if (_secretClicks >= 7) {
+        _secretClicks = 0;
+        gameState.mirrorMode = !gameState.mirrorMode;
+        const title = document.getElementById('gameTitle');
+        if (gameState.mirrorMode) {
+            title.style.color = '#764ba2';
+            title.textContent = '🪞 Mirror Game';
+        } else {
+            title.style.color = '';
+            title.textContent = '⭕ Circle Game';
+        }
+    }
+}
+
+window.onload = () => {
+    // Initialize authentication first
+    initializeAuth();
+
+    // Load themes and apply saved one
+    loadThemes().then(() => applySavedTheme());
+
+    // Load tutorial state
+    loadSeenTutorials();
+
+    const difficultyRadio = document.querySelector('input[name="difficulty"][value="medium"]');
+    if (difficultyRadio) difficultyRadio.checked = true;
+
+    const savedSingleName = localStorage.getItem('singlePlayerName');
+    if (savedSingleName) {
+        document.getElementById('singlePlayerName').value = savedSingleName;
+        // Pre-load achievements so the scoreboard tab works immediately
+        loadAchievements(savedSingleName);
+        gameState.playerName = savedSingleName;
+    }
+
+    const savedMultiName = localStorage.getItem('multiPlayerName');
+    if (savedMultiName) document.getElementById('multiPlayerName').value = savedMultiName;
+
+    const savedLocal1 = localStorage.getItem('localPlayer1Name');
+    if (savedLocal1) document.getElementById('localPlayer1Name').value = savedLocal1;
+    const savedLocal2 = localStorage.getItem('localPlayer2Name');
+    if (savedLocal2) document.getElementById('localPlayer2Name').value = savedLocal2;
+
+    let unlockTimer = null;
+    const debouncedRefresh = () => {
+        clearTimeout(unlockTimer);
+        unlockTimer = setTimeout(refreshUnlocks, 300);
+    };
+
+    // Auth on blur — fires when user tabs/clicks away from the name field
+    let authTimer = {};
+    function attachAuthBlur(inputId, triggerUnlocks) {
+        const el = document.getElementById(inputId);
+        if (!el) return;
+        if (triggerUnlocks) el.addEventListener('input', debouncedRefresh);
+        el.addEventListener('blur', () => {
+            const name = el.value.trim();
+            if (!name) return;
+            clearTimeout(authTimer[inputId]);
+            authTimer[inputId] = setTimeout(async () => {
+                if (document.getElementById('passwordModal').classList.contains('show')) return;
+                const res = await fetch(`/password/exists?name=${encodeURIComponent(name)}`).catch(() => null);
+                if (!res) return;
+                const data = await res.json();
+                if (data.exists) {
+                    const ok = await openPasswordModal(name, 'verify');
+                    if (!ok) el.value = '';
+                }
+            }, 300);
+        });
+    }
+
+    attachAuthBlur('singlePlayerName', true);
+    attachAuthBlur('multiPlayerName', true);
+    attachAuthBlur('localPlayer1Name', false);
+    attachAuthBlur('localPlayer2Name', false);
+    attachAuthBlur('joinPlayerName', false);
+
+    refreshUnlocks();
+};

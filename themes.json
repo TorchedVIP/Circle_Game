@@ -1,0 +1,76 @@
+{
+  "themes": [
+    {
+      "code": "classic",
+      "name": "Classic Purple",
+      "description": "The original Circle Game gradient.",
+      "background": "linear-gradient(135deg, #667eea 0%, #764ba2 100%)"
+    },
+    {
+      "code": "ocean",
+      "name": "Deep Ocean",
+      "description": "Cool blues inspired by the deep sea.",
+      "background": "linear-gradient(135deg, #2193b0 0%, #6dd5ed 100%)"
+    },
+    {
+      "code": "sunset",
+      "name": "Sunset",
+      "description": "Warm oranges and pinks like a summer evening.",
+      "background": "linear-gradient(135deg, #f12711 0%, #f5af19 100%)"
+    },
+    {
+      "code": "forest",
+      "name": "Forest",
+      "description": "Deep greens for a natural feel.",
+      "background": "linear-gradient(135deg, #134e5e 0%, #71b280 100%)"
+    },
+    {
+      "code": "midnight",
+      "name": "Midnight",
+      "description": "Dark and moody for late-night sessions.",
+      "background": "linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%)"
+    },
+    {
+      "code": "candy",
+      "name": "Candy",
+      "description": "Sweet pinks and purples.",
+      "background": "linear-gradient(135deg, #ff9a9e 0%, #fecfef 100%)"
+    },
+    {
+      "code": "monochrome",
+      "name": "Monochrome",
+      "description": "Simple black and grey.",
+      "background": "linear-gradient(135deg, #434343 0%, #000000 100%)"
+    },
+    {
+      "code": "wolf",
+      "name": "L0n3W01f",
+      "description": "Purple!",
+      "background": "linear-gradient(135deg, #CBC3E3 0%, #800080 100%)"
+    },
+    {
+      "code": "duck",
+      "name": "Duck!",
+      "description": "Quackers!",
+      "background": "linear-gradient(135deg, #FFAE42 0%, #FF8C00 100%)"
+    },
+    {
+      "code": "ripvip",
+      "name": "VIP",
+      "description": "VIP's colours!",
+      "background": "linear-gradient(135deg, #000000 0%, #FFAE42 50%, #FF8C00 100%)"
+    },
+    {
+      "code": "secret",
+      "name": "Secret",
+      "description": "Unlocked by finding the hidden achievement combo.",
+      "background": "linear-gradient(135deg, #1a1a2e 0%, #16213e 33%, #0f3460 66%, #e94560 100%)"
+    },
+    {
+      "code": "golden",
+      "name": "Golden",
+      "description": "For the truly dedicated. 50+ wins.",
+      "background": "linear-gradient(135deg, #f7971e 0%, #ffd200 50%, #f7971e 100%)"
+    }
+  ]
+}
