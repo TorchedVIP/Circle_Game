@@ -174,20 +174,26 @@ function buildRows(mapName) {
     }
     const entries = MAPS[mapName] || MAPS.classic;
     const rows = {};
+    const holes = {};
     entries.forEach((entry, i) => {
         if (Array.isArray(entry)) {
-            // Pattern: 1 = circle present, 0 = hole (already removed)
+            // Pattern: 1 = circle present, 0 = hole
+            // Convert: 1 (circle) -> 0 (present), 0 (hole) -> 1 (removed)
             rows[i + 1] = entry.map(v => v === 0 ? 1 : 0);
+            // Track which positions are initial holes
+            entry.forEach((v, j) => {
+                if (v === 0) holes[`${i + 1}-${j}`] = true;
+            });
         } else {
             rows[i + 1] = new Array(entry).fill(0);
         }
     });
-    return rows;
+    return { rows, holes };
 }
 
 let gameMode = 'single'; // 'single' | 'local' | 'multi'
 let gameState = {
-    rows: buildRows('classic'),
+    rows: buildRows('classic').rows,
     selected: {},
     isPlayerTurn: true,
     difficulty: 'medium',
@@ -230,7 +236,9 @@ let gameState = {
     timerInterval: null,
     timerRemaining: 0,
     // Secret mirror mode — every player move is mirrored by the computer on the opposite side
-    mirrorMode: false
+    mirrorMode: false,
+    // Track initial holes in the map (positions that start removed and render as empty space)
+    initialHoles: {}
 };
 
 // ============ DICE MODE ============
@@ -368,46 +376,29 @@ function setGameMode(mode, button) {
     document.getElementById('multiplayerOptions').classList.toggle('hidden', mode !== 'multi');
 }
 
+// Helper: check if a mode option is visible and its checkbox is checked
+function isModeEnabled(optionId, checkboxId) {
+    const option = document.getElementById(optionId);
+    const checkbox = document.getElementById(checkboxId);
+    return option && !option.classList.contains('hidden') && checkbox && checkbox.checked;
+}
+
 function startSinglePlayer() {
     if (!currentUser) {
         alert('Please login first to play single player');
         return;
     }
 
-    const difficulty = document.querySelector('input[name="difficulty"]:checked').value;
-    const turnOrder = document.querySelector('input[name="turn-order"]:checked').value;
-    const map = document.querySelector('input[name="single-map"]:checked').value;
-    const name = currentUser.username;
-
-    const diceOption    = document.getElementById('diceModeOption');
-    const diceCheckbox  = document.getElementById('diceModeCheckbox');
-    const diceMode      = diceOption && !diceOption.classList.contains('hidden') && diceCheckbox && diceCheckbox.checked;
-    const armourOption  = document.getElementById('armourModeOption');
-    const armourCheckbox= document.getElementById('armourModeCheckbox');
-    const armourMode    = armourOption && !armourOption.classList.contains('hidden') && armourCheckbox && armourCheckbox.checked;
-    const cascadeOption = document.getElementById('cascadeModeOption');
-    const cascadeCheckbox=document.getElementById('cascadeModeCheckbox');
-    const cascadeMode   = cascadeOption && !cascadeOption.classList.contains('hidden') && cascadeCheckbox && cascadeCheckbox.checked;
-    const doublesOption = document.getElementById('doublesModeOption');
-    const doublesCheckbox=document.getElementById('doublesModeCheckbox');
-    const doublesMode   = doublesOption && !doublesOption.classList.contains('hidden') && doublesCheckbox && doublesCheckbox.checked;
-    const sandOption    = document.getElementById('sandModeOption');
-    const sandCheckbox  = document.getElementById('sandModeCheckbox');
-    const sandMode      = sandOption && !sandOption.classList.contains('hidden') && sandCheckbox && sandCheckbox.checked;
-    const portalOption  = document.getElementById('portalModeOption');
-    const portalCheckbox= document.getElementById('portalModeCheckbox');
-    const portalMode    = portalOption && !portalOption.classList.contains('hidden') && portalCheckbox && portalCheckbox.checked;
-
-    gameState.difficulty  = difficulty;
-    gameState.turnOrder   = turnOrder;
-    gameState.map         = map;
-    gameState.playerName  = name;
-    gameState.diceMode    = diceMode;
-    gameState.armourMode  = armourMode;
-    gameState.cascadeMode = cascadeMode;
-    gameState.doublesMode = doublesMode;
-    gameState.sandMode    = sandMode;
-    gameState.portalMode  = portalMode;
+    gameState.difficulty   = document.querySelector('input[name="difficulty"]:checked').value;
+    gameState.turnOrder    = document.querySelector('input[name="turn-order"]:checked').value;
+    gameState.map          = document.querySelector('input[name="single-map"]:checked').value;
+    gameState.playerName   = currentUser.username;
+    gameState.diceMode     = isModeEnabled('diceModeOption', 'diceModeCheckbox');
+    gameState.armourMode   = isModeEnabled('armourModeOption', 'armourModeCheckbox');
+    gameState.cascadeMode  = isModeEnabled('cascadeModeOption', 'cascadeModeCheckbox');
+    gameState.doublesMode  = isModeEnabled('doublesModeOption', 'doublesModeCheckbox');
+    gameState.sandMode     = isModeEnabled('sandModeOption', 'sandModeCheckbox');
+    gameState.portalMode   = isModeEnabled('portalModeOption', 'portalModeCheckbox');
     gameState.timerSeconds = parseInt(document.querySelector('input[name="timer"]:checked')?.value || '0');
     gameMode = 'single';
 
@@ -423,19 +414,15 @@ function oneDeviceMulti() {
     if (!p1Name) { alert('Please enter Player 1\'s name.'); return; }
     if (!p2Name) { alert('Please enter Player 2\'s name.'); return; }
 
-    const diceOption  = document.getElementById('localDiceModeOption');
-    const diceCheckbox= document.getElementById('localDiceModeCheckbox');
-    const diceMode    = diceOption && !diceOption.classList.contains('hidden') && diceCheckbox && diceCheckbox.checked;
-
     gameState.playerName  = p1Name;
     gameState.player2Name = p2Name;
     gameState.map         = map;
-    gameState.diceMode    = diceMode;
-    gameState.armourMode  = false;
-    gameState.cascadeMode = false;
-    gameState.doublesMode = false;
-    gameState.sandMode    = false;
-    gameState.portalMode  = false;
+    gameState.diceMode    = isModeEnabled('localDiceModeOption', 'localDiceModeCheckbox');
+    gameState.doublesMode = isModeEnabled('localDoublesModeOption', 'localDoublesModeCheckbox');
+    gameState.armourMode  = isModeEnabled('localArmourModeOption', 'localArmourModeCheckbox');
+    gameState.cascadeMode = isModeEnabled('localCascadeModeOption', 'localCascadeModeCheckbox');
+    gameState.sandMode    = isModeEnabled('localSandModeOption', 'localSandModeCheckbox');
+    gameState.portalMode  = isModeEnabled('localPortalModeOption', 'localPortalModeCheckbox');
     gameMode = 'local';
     localStorage.setItem('localPlayer1Name', p1Name);
     localStorage.setItem('localPlayer2Name', p2Name);
@@ -445,29 +432,20 @@ function oneDeviceMulti() {
 }
 
 function createMultiplayerGame() {
-    // Multiplayer requires login
     if (!currentUser) {
         alert('Please login first to play multiplayer');
         return;
     }
 
-    const name = currentUser.username;
     const map = document.querySelector('input[name="multi-map"]:checked').value;
-    const diceMode    = document.getElementById('multiDiceModeCheckbox')?.checked && !document.getElementById('multiDiceModeOption')?.classList.contains('hidden');
-    const doublesMode = document.getElementById('multiDoublesModeCheckbox')?.checked && !document.getElementById('multiDoublesModeOption')?.classList.contains('hidden');
-    const armourMode  = document.getElementById('multiArmourModeCheckbox')?.checked && !document.getElementById('multiArmourModeOption')?.classList.contains('hidden');
-    const portalMode  = document.getElementById('multiPortalModeCheckbox')?.checked && !document.getElementById('multiPortalModeOption')?.classList.contains('hidden');
-    const sandMode    = document.getElementById('multiSandModeCheckbox')?.checked && !document.getElementById('multiSandModeOption')?.classList.contains('hidden');
-    const cascadeMode = document.getElementById('multiCascadeModeCheckbox')?.checked && !document.getElementById('multiCascadeModeOption')?.classList.contains('hidden');
-
-    gameState.playerName = name;
-    gameState.map = map;
-    gameState.diceMode = false;
-    gameState.doublesMode = doublesMode;
-    gameState.armourMode = armourMode;
-    gameState.portalMode = portalMode;
-    gameState.sandMode = sandMode;
-    gameState.cascadeMode = cascadeMode;
+    gameState.playerName  = currentUser.username;
+    gameState.map         = map;
+    gameState.diceMode    = isModeEnabled('multiDiceModeOption', 'multiDiceModeCheckbox');
+    gameState.doublesMode = isModeEnabled('multiDoublesModeOption', 'multiDoublesModeCheckbox');
+    gameState.armourMode  = isModeEnabled('multiArmourModeOption', 'multiArmourModeCheckbox');
+    gameState.portalMode  = isModeEnabled('multiPortalModeOption', 'multiPortalModeCheckbox');
+    gameState.sandMode    = isModeEnabled('multiSandModeOption', 'multiSandModeCheckbox');
+    gameState.cascadeMode = isModeEnabled('multiCascadeModeOption', 'multiCascadeModeCheckbox');
     unlockAchievement('friendly');
     gameMode = 'multi';
     initGame();
@@ -475,7 +453,12 @@ function createMultiplayerGame() {
     document.getElementById('submitBtn').disabled = true;
     document.getElementById('gameState').textContent = 'Connecting...';
     const ws = connectWebSocket(() => {
-        ws.send(JSON.stringify({ action: 'create_game', map, diceMode, doublesMode, armourMode, portalMode, sandMode, cascadeMode }));
+        ws.send(JSON.stringify({
+            action: 'create_game', map,
+            diceMode: gameState.diceMode, doublesMode: gameState.doublesMode,
+            armourMode: gameState.armourMode, portalMode: gameState.portalMode,
+            sandMode: gameState.sandMode, cascadeMode: gameState.cascadeMode
+        }));
     });
 }
 
@@ -613,6 +596,13 @@ function handleWsMessage(data) {
             gameState.cascadeMode = !!data.cascadeMode;
             gameState.armour = {};
             gameState.pendingCascade = null;
+            // Reconstruct initial holes from the received rows (positions that start as removed)
+            gameState.initialHoles = {};
+            for (const r of Object.keys(data.rows)) {
+                for (let i = 0; i < data.rows[r].length; i++) {
+                    if (data.rows[r][i] === 1) gameState.initialHoles[`${r}-${i}`] = true;
+                }
+            }
             // Initialize armour for multiplayer
             if (gameState.armourMode) {
                 const rowNums = Object.keys(gameState.rows).map(Number);
@@ -667,7 +657,9 @@ function handleWsMessage(data) {
 // ============ GAME LOGIC ============
 function initGame() {
     gameState.forcedRow = null;
-    gameState.rows = buildRows(gameState.map || 'classic');
+    const built = buildRows(gameState.map || 'classic');
+    gameState.rows = built.rows;
+    gameState.initialHoles = built.holes;
     gameState.selected = {};
     gameState.gameOver = false;
     gameState.resultRecorded = false;
@@ -722,11 +714,8 @@ function initGame() {
 }
 function pickForcedRow() {
     const rows = Object.keys(gameState.rows).map(Number);
-
     for (const r of rows) {
-        if (gameState.rows[r].some(v => v === 0)) {
-            return r;
-        }
+        if (gameState.rows[r].some(v => v === 0)) return r;
     }
     return null;
 }
@@ -750,10 +739,19 @@ function renderBoard() {
 
         const circles = gameState.rows[rowNum];
         for (let i = 0; i < circles.length; i++) {
+            const key = `${rowNum}-${i}`;
+
+            // Initial holes render as invisible spacers (preserve spacing)
+            if (gameState.initialHoles && gameState.initialHoles[key]) {
+                const spacer = document.createElement('div');
+                spacer.className = 'circle';
+                spacer.style.visibility = 'hidden';
+                circlesDiv.appendChild(spacer);
+                continue;
+            }
+
             const circle = document.createElement('div');
             circle.className = 'circle';
-
-            const key = `${rowNum}-${i}`;
             const armourHits = gameState.armour[key] || 0;
 
             if (circles[i] === 1) {
@@ -944,21 +942,7 @@ function submitMove() {
     finishTurn(moveSize);
 }
 function updateForcedRowAfterMove() {
-    if (!gameState.forcedMode) {
-        gameState.forcedRow = null;
-        return;
-    }
-
-    const rows = Object.keys(gameState.rows).map(Number).sort((a, b) => a - b);
-
-    for (const r of rows) {
-        if (gameState.rows[r].some(v => v === 0)) {
-            gameState.forcedRow = r;
-            return;
-        }
-    }
-
-    gameState.forcedRow = null;
+    gameState.forcedRow = gameState.forcedMode ? pickForcedRow() : null;
 }
 
 function applyMove(row, positions) {
@@ -1297,7 +1281,6 @@ function computerMove() {
         const rowArr = gameState.rows[lm.row];
         if (rowArr) {
             const rowLen = rowArr.length;
-            // Mirror positions from the right
             const mirrorPositions = lm.positions
                 .map(p => rowLen - 1 - p)
                 .filter(p => p >= 0 && p < rowLen && rowArr[p] === 0)
@@ -1323,112 +1306,69 @@ function computerMove() {
                 return;
             }
         }
-        // If mirror isn't possible, fall through to normal AI
     }
 
+    if (gameMode === 'multi') return;
+
+    // Pick the move
+    let move;
     if (gameState.forcedMode && gameState.forcedRow !== null) {
         const forcedMoves = getAllLegalMoves().filter(m => m.row === gameState.forcedRow);
+        move = forcedMoves.length > 0 ? forcedMoves[Math.floor(Math.random() * forcedMoves.length)] : null;
+    } else {
+        move = findBestMove(gameState.difficulty);
+    }
 
-        if (forcedMoves.length > 0) {
-            const move = forcedMoves[Math.floor(Math.random() * forcedMoves.length)];
-            applyMove(move.row, move.positions);
+    if (!move) {
+        gameState.gameOver = true;
+        updateGameState();
+        return;
+    }
 
-            // Kill circle: computer hit it = computer loses (player wins)
-            if (gameState._hitKillCircle) {
-                gameState._hitKillCircle = false;
-                gameState.gameOver = true;
-                gameState.isPlayerTurn = false;
-                renderBoard();
-                updateGameState();
-                return;
+    applyMove(move.row, move.positions);
+
+    // Kill circle: computer hit it = computer loses
+    if (gameState._hitKillCircle) {
+        gameState._hitKillCircle = false;
+        gameState.gameOver = true;
+        gameState.isPlayerTurn = false;
+        renderBoard();
+        updateGameState();
+        return;
+    }
+
+    // Cascade handling
+    if (gameState.cascadeMode) {
+        const removed = move.positions.filter(p => gameState.rows[move.row][p] === 1);
+        if (removed.length > 0) {
+            const rowNums = Object.keys(gameState.rows).map(Number);
+            const hasAbove = rowNums.some(r => r < move.row && gameState.rows[r].some(v => v === 0));
+            if (hasAbove) {
+                const pc = { row: move.row, leftPos: removed[0], rightPos: removed[removed.length - 1] };
+                const side = computerPickCascade(pc);
+                applyCascade(move.row, side === 'left' ? pc.leftPos : pc.rightPos);
             }
-
-            if (gameState.cascadeMode) {
-                const removed = move.positions.filter(p => gameState.rows[move.row][p] === 1);
-                if (removed.length > 0) {
-                    const rowNums = Object.keys(gameState.rows).map(Number);
-                    const hasAbove = rowNums.some(r => r < move.row && gameState.rows[r].some(v => v === 0));
-                    if (hasAbove) {
-                        const pc = { row: move.row, leftPos: removed[0], rightPos: removed[removed.length - 1] };
-                        const side = computerPickCascade(pc);
-                        applyCascade(move.row, side === 'left' ? pc.leftPos : pc.rightPos);
-                    }
-                }
-            }
-
-            applySandGravity();
-            renderBoard();
-            document.getElementById('gameState').textContent =
-                `Computer removed row ${move.row}, circles ${move.positions.map(p => p + 1).join(', ')}`;
-
-            if (isGameOver()) { gameState.gameOver = true; updateGameState(); return; }
-
-            // Doubles check for forced-row path
-            if (gameState.doublesMode && (move.positions.length === 2 || move.positions.length === 6)) {
-                if (gameState.diceMode) rollDice();
-                updateGameState();
-                setTimeout(computerMove, 1000);
-                return;
-            }
-
-            gameState.isPlayerTurn = true;
-            if (gameState.diceMode) rollDice();
-            updateGameState();
-            return;
         }
     }
 
-    if (gameMode !== 'multi') {
-        const move = findBestMove(gameState.difficulty);
-        if (!move) {
-            gameState.gameOver = true;
-            updateGameState();
-            return;
-        }
-        applyMove(move.row, move.positions);
+    applySandGravity();
+    renderBoard();
+    document.getElementById('gameState').textContent =
+        `Computer removed row ${move.row}, circles ${move.positions.map(p => p + 1).join(', ')}`;
 
-        // Kill circle: computer hit it = computer loses
-        if (gameState._hitKillCircle) {
-            gameState._hitKillCircle = false;
-            gameState.gameOver = true;
-            gameState.isPlayerTurn = false;
-            renderBoard();
-            updateGameState();
-            return;
-        }
+    if (isGameOver()) { gameState.gameOver = true; updateGameState(); return; }
 
-        if (gameState.cascadeMode) {
-            const removed = move.positions.filter(p => gameState.rows[move.row][p] === 1);
-            if (removed.length > 0) {
-                const rowNums = Object.keys(gameState.rows).map(Number);
-                const hasAbove = rowNums.some(r => r < move.row && gameState.rows[r].some(v => v === 0));
-                if (hasAbove) {
-                    const pc = { row: move.row, leftPos: removed[0], rightPos: removed[removed.length - 1] };
-                    const side = computerPickCascade(pc);
-                    applyCascade(move.row, side === 'left' ? pc.leftPos : pc.rightPos);
-                }
-            }
-        }
-
-        applySandGravity();
-        renderBoard();
-        document.getElementById('gameState').textContent =
-            `Computer removed row ${move.row}, circles ${move.positions.map(p => p + 1).join(', ')}`;
-
-        if (isGameOver()) { gameState.gameOver = true; updateGameState(); return; }
-
-        // Doubles: computer took exactly 2 or 6 → goes again
-        if (gameState.doublesMode && (move.positions.length === 2 || move.positions.length === 6)) {
-            if (gameState.diceMode) rollDice();
-            updateGameState();
-            setTimeout(computerMove, 1000);
-            return;
-        }
-
-        gameState.isPlayerTurn = true;
+    // Doubles: computer took exactly 2 or 6 → goes again
+    if (gameState.doublesMode && (move.positions.length === 2 || move.positions.length === 6)) {
         if (gameState.diceMode) rollDice();
         updateGameState();
+        setTimeout(computerMove, 1000);
+        return;
     }
+
+    gameState.isPlayerTurn = true;
+    if (gameState.diceMode) rollDice();
+    updateGameState();
 }
 
 // ============ AI & GAME THEORY ============
@@ -2100,36 +2040,21 @@ async function refreshUnlocks() {
             const wins = getPlayerWins(singleName);
             gameState.playerLevel = wins;
 
-            applyUnlock(
-                document.getElementById('doublesModeOption'),
-                document.getElementById('doublesModeCheckbox'),
-                wins >= 3
-            );
-            applyUnlock(
-                document.getElementById('diceModeOption'),
-                document.getElementById('diceModeCheckbox'),
-                wins >= 6
-            );
-            applyUnlock(
-                document.getElementById('armourModeOption'),
-                document.getElementById('armourModeCheckbox'),
-                wins >= 10
-            );
-            applyUnlock(
-                document.getElementById('cascadeModeOption'),
-                document.getElementById('cascadeModeCheckbox'),
-                wins >= 20
-            );
-            applyUnlock(
-                document.getElementById('sandModeOption'),
-                document.getElementById('sandModeCheckbox'),
-                wins >= 15
-            );
-            applyUnlock(
-                document.getElementById('portalModeOption'),
-                document.getElementById('portalModeCheckbox'),
-                wins >= 12
-            );
+            applyUnlock(document.getElementById('doublesModeOption'), document.getElementById('doublesModeCheckbox'), wins >= 3);
+            applyUnlock(document.getElementById('diceModeOption'), document.getElementById('diceModeCheckbox'), wins >= 6);
+            applyUnlock(document.getElementById('armourModeOption'), document.getElementById('armourModeCheckbox'), wins >= 10);
+            applyUnlock(document.getElementById('portalModeOption'), document.getElementById('portalModeCheckbox'), wins >= 12);
+            applyUnlock(document.getElementById('sandModeOption'), document.getElementById('sandModeCheckbox'), wins >= 15);
+            applyUnlock(document.getElementById('cascadeModeOption'), document.getElementById('cascadeModeCheckbox'), wins >= 20);
+
+            // Local mode uses the same unlock thresholds
+            applyUnlock(document.getElementById('localDoublesModeOption'), document.getElementById('localDoublesModeCheckbox'), wins >= 3);
+            applyUnlock(document.getElementById('localDiceModeOption'), document.getElementById('localDiceModeCheckbox'), wins >= 6);
+            applyUnlock(document.getElementById('localArmourModeOption'), document.getElementById('localArmourModeCheckbox'), wins >= 10);
+            applyUnlock(document.getElementById('localPortalModeOption'), document.getElementById('localPortalModeCheckbox'), wins >= 12);
+            applyUnlock(document.getElementById('localSandModeOption'), document.getElementById('localSandModeCheckbox'), wins >= 15);
+            applyUnlock(document.getElementById('localCascadeModeOption'), document.getElementById('localCascadeModeCheckbox'), wins >= 20);
+
             // Custom map editor unlock
             const customEl = document.getElementById('customMapOption');
             if (customEl) {
@@ -2195,24 +2120,41 @@ function clearMapEditor() {
 }
 
 function saveCustomMap() {
-    // Convert grid to a map format: count active cells per row
-    const rows = {};
+    // Save the grid — crop empty rows/columns from the edges
     let hasCircles = false;
     for (let r = 0; r < 7; r++) {
-        const count = customMapGrid[r].filter(v => v).length;
-        if (count > 0) {
-            rows[r + 1] = count;
-            hasCircles = true;
-        }
+        if (customMapGrid[r].some(v => v)) { hasCircles = true; break; }
     }
     if (!hasCircles) {
         alert('Please add at least one circle to your map.');
         return;
     }
-    // Store as a custom map entry
-    MAPS.custom = Object.values(rows);
+
+    // Find bounding box of active cells
+    let minRow = 7, maxRow = -1, minCol = 7, maxCol = -1;
+    for (let r = 0; r < 7; r++) {
+        for (let c = 0; c < 7; c++) {
+            if (customMapGrid[r][c]) {
+                if (r < minRow) minRow = r;
+                if (r > maxRow) maxRow = r;
+                if (c < minCol) minCol = c;
+                if (c > maxCol) maxCol = c;
+            }
+        }
+    }
+
+    // Build cropped map entries
+    const mapEntries = [];
+    for (let r = minRow; r <= maxRow; r++) {
+        const pattern = [];
+        for (let c = minCol; c <= maxCol; c++) {
+            pattern.push(customMapGrid[r][c] ? 1 : 0);
+        }
+        mapEntries.push(pattern);
+    }
+
+    MAPS.custom = mapEntries;
     closeMapEditor();
-    // Select the custom radio
     const radio = document.querySelector('input[name="single-map"][value="custom"]');
     if (radio) radio.checked = true;
     alert('Custom map saved! Select "Custom Map" and start your game.');
@@ -2228,14 +2170,15 @@ function previewSelectedMap(context) {
         mapName = document.querySelector('input[name="multi-map"]:checked')?.value || 'classic';
     }
 
-    const rows = buildRows(mapName);
-    renderMapPreview(rows);
+    const built = buildRows(mapName);
+    renderMapPreview(built.rows, built.holes);
     document.getElementById('mapPreviewModal').classList.add('show');
 }
 
-function renderMapPreview(rows) {
+function renderMapPreview(rows, holes) {
     const board = document.getElementById('mapPreviewBoard');
     board.innerHTML = '';
+    holes = holes || {};
     const rowNums = Object.keys(rows).map(Number).sort((a, b) => a - b);
     for (const rowNum of rowNums) {
         const rowDiv = document.createElement('div');
@@ -2247,12 +2190,18 @@ function renderMapPreview(rows) {
         const circlesDiv = document.createElement('div');
         circlesDiv.className = 'circles';
         for (let i = 0; i < rows[rowNum].length; i++) {
-            const circle = document.createElement('div');
-            circle.className = 'circle';
-            if (rows[rowNum][i] === 1) {
-                circle.classList.add('removed');
+            const key = `${rowNum}-${i}`;
+            if (holes[key]) {
+                // Initial hole — render as invisible spacer
+                const spacer = document.createElement('div');
+                spacer.className = 'circle';
+                spacer.style.visibility = 'hidden';
+                circlesDiv.appendChild(spacer);
+            } else {
+                const circle = document.createElement('div');
+                circle.className = 'circle';
+                circlesDiv.appendChild(circle);
             }
-            circlesDiv.appendChild(circle);
         }
         rowDiv.appendChild(circlesDiv);
         board.appendChild(rowDiv);
@@ -3345,12 +3294,13 @@ function applyThemeCode() {
     // Secret code: unlock all modes
     if (code === '82662') {
         document.getElementById('themeCodeInput').value = '';
-        // Force-show all mode options
         const allModeIds = [
             'doublesModeOption', 'diceModeOption', 'armourModeOption',
             'portalModeOption', 'sandModeOption', 'cascadeModeOption',
+            'localDoublesModeOption', 'localDiceModeOption', 'localArmourModeOption',
+            'localPortalModeOption', 'localSandModeOption', 'localCascadeModeOption',
             'multiDoublesModeOption', 'multiDiceModeOption', 'multiArmourModeOption',
-            'multiSandModeOption', 'multiCascadeModeOption'
+            'multiPortalModeOption', 'multiSandModeOption', 'multiCascadeModeOption'
         ];
         allModeIds.forEach(id => {
             const el = document.getElementById(id);

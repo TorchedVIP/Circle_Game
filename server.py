@@ -33,6 +33,8 @@ def make_rows(map_name='classic'):
     rows = {}
     for i, entry in enumerate(entries):
         if isinstance(entry, list):
+            # Pattern: 1 = circle present, 0 = hole
+            # Convert: 1 (circle) -> 0 (present), 0 (hole) -> 1 (removed)
             rows[str(i + 1)] = [0 if v == 1 else 1 for v in entry]
         else:
             rows[str(i + 1)] = [0] * entry
