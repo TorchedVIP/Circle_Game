@@ -123,7 +123,7 @@ async def register_user(request):
     except Exception:
         return web.json_response({'error': 'Invalid JSON'}, status=400)
     
-    username = str(data.get('username', '')).strip()[:20]
+    username = str(data.get('username', '')).strip()[:15]
     password = str(data.get('password', '')).strip()
     
     if not username or not password:
@@ -160,7 +160,7 @@ async def login_user(request):
     except Exception:
         return web.json_response({'error': 'Invalid JSON'}, status=400)
     
-    username = str(data.get('username', '')).strip()[:20]
+    username = str(data.get('username', '')).strip()[:15]
     password = str(data.get('password', '')).strip()
     
     if not username or not password:
@@ -198,7 +198,7 @@ async def set_password(request):
         data = await request.json()
     except Exception:
         return web.json_response({'error': 'Invalid JSON'}, status=400)
-    name = str(data.get('name', '')).strip()[:20].lower()
+    name = str(data.get('name', '')).strip()[:15].lower()
     sequence = data.get('sequence', [])
     if not name or not sequence or len(sequence) < 1:
         return web.json_response({'error': 'Name and sequence required'}, status=400)
@@ -216,7 +216,7 @@ async def verify_password(request):
         data = await request.json()
     except Exception:
         return web.json_response({'error': 'Invalid JSON'}, status=400)
-    name = str(data.get('name', '')).strip()[:20].lower()
+    name = str(data.get('name', '')).strip()[:15].lower()
     sequence = data.get('sequence', [])
     board = load_scoreboard()
     stored = board.get('passwords', {}).get(name)
@@ -244,7 +244,7 @@ async def unlock_achievement(request):
         data = await request.json()
     except Exception:
         return web.json_response({'error': 'Invalid JSON'}, status=400)
-    name = str(data.get('name', '')).strip()[:20].lower()
+    name = str(data.get('name', '')).strip()[:15].lower()
     achievement = str(data.get('achievement', '')).strip()
     if not name or not achievement:
         return web.json_response({'error': 'Name and achievement required'}, status=400)
@@ -264,6 +264,11 @@ async def get_scoreboard(request):
     board = load_scoreboard()
     # Don't expose raw passwords or user hashes
     safe = {k: v for k, v in board.items() if k not in ('passwords', 'users')}
+    # Ensure modes and puzzles keys exist in response
+    if 'modes' not in safe:
+        safe['modes'] = {}
+    if 'puzzles' not in safe:
+        safe['puzzles'] = []
     return web.json_response(safe)
 
 
@@ -279,7 +284,7 @@ async def admin_reset_password(request):
         return web.json_response({'error': 'Invalid JSON'}, status=400)
 
     admin_password = str(data.get('adminPassword', ''))
-    target_name = str(data.get('targetName', '')).strip()[:20].lower()
+    target_name = str(data.get('targetName', '')).strip()[:15].lower()
     new_sequence = data.get('newSequence', [])
 
     if admin_password != ADMIN_PASSWORD:
@@ -309,7 +314,7 @@ async def admin_delete_password(request):
         return web.json_response({'error': 'Invalid JSON'}, status=400)
 
     admin_password = str(data.get('adminPassword', ''))
-    target_name = str(data.get('targetName', '')).strip()[:20].lower()
+    target_name = str(data.get('targetName', '')).strip()[:15].lower()
 
     if admin_password != ADMIN_PASSWORD:
         return web.json_response({'error': 'Unauthorized'}, status=403)
@@ -336,7 +341,7 @@ async def admin_delete_user(request):
         return web.json_response({'error': 'Invalid JSON'}, status=400)
 
     admin_password = str(data.get('adminPassword', ''))
-    target_name = str(data.get('targetName', '')).strip()[:20].lower()
+    target_name = str(data.get('targetName', '')).strip()[:15].lower()
 
     if admin_password != ADMIN_PASSWORD:
         return web.json_response({'error': 'Unauthorized'}, status=403)
@@ -363,6 +368,13 @@ async def admin_delete_user(request):
     # Remove from multiplayer leaderboard
     board['multiplayer'] = [e for e in board.get('multiplayer', []) if e['name'].lower() != target_name]
 
+    # Remove from mode leaderboards
+    for mode_key in list(board.get('modes', {}).keys()):
+        board['modes'][mode_key] = [e for e in board['modes'][mode_key] if e['name'].lower() != target_name]
+
+    # Remove from puzzle leaderboard
+    board['puzzles'] = [e for e in board.get('puzzles', []) if e['name'].lower() != target_name]
+
     save_scoreboard(board)
     return web.json_response({'ok': True, 'message': f'User "{target_name}" fully deleted'})
 
@@ -373,7 +385,7 @@ async def post_single_score(request):
     except Exception:
         return web.json_response({'error': 'Invalid JSON'}, status=400)
 
-    name = str(data.get('name', '')).strip()[:20]
+    name = str(data.get('name', '')).strip()[:15]
     if not name:
         return web.json_response({'error': 'Name required'}, status=400)
     difficulty = data.get('difficulty', 'medium')
@@ -398,7 +410,7 @@ async def post_multi_score(request):
     except Exception:
         return web.json_response({'error': 'Invalid JSON'}, status=400)
 
-    name = str(data.get('name', '')).strip()[:20]
+    name = str(data.get('name', '')).strip()[:15]
     if not name:
         return web.json_response({'error': 'Name required'}, status=400)
     won = bool(data.get('won', False))
@@ -420,6 +432,68 @@ async def post_multi_score(request):
             'fastestTime': duration
         })
     board['multiplayer'].sort(key=lambda e: e['wins'], reverse=True)
+    save_scoreboard(board)
+    return web.json_response({'ok': True})
+
+
+async def post_mode_score(request):
+    """POST /scoreboard/mode — body {name, mode}. Records a win for a specific game mode."""
+    try:
+        data = await request.json()
+    except Exception:
+        return web.json_response({'error': 'Invalid JSON'}, status=400)
+
+    name = str(data.get('name', '')).strip()[:15]
+    mode = str(data.get('mode', '')).strip().lower()
+    if not name:
+        return web.json_response({'error': 'Name required'}, status=400)
+    valid_modes = ('dice', 'doubles', 'armour', 'portal', 'sand', 'cascade', 'puzzle')
+    if mode not in valid_modes:
+        return web.json_response({'error': 'Invalid mode'}, status=400)
+
+    board = load_scoreboard()
+    if 'modes' not in board:
+        board['modes'] = {}
+    if mode not in board['modes']:
+        board['modes'][mode] = []
+
+    entries = board['modes'][mode]
+    existing = next((e for e in entries if e['name'].lower() == name.lower()), None)
+    if existing:
+        existing['wins'] += 1
+    else:
+        entries.append({'name': name, 'wins': 1})
+    entries.sort(key=lambda e: e['wins'], reverse=True)
+    save_scoreboard(board)
+    return web.json_response({'ok': True})
+
+
+async def post_puzzle_score(request):
+    """POST /scoreboard/puzzle — body {name, points}. Adds puzzle points to the player's total."""
+    try:
+        data = await request.json()
+    except Exception:
+        return web.json_response({'error': 'Invalid JSON'}, status=400)
+
+    name = str(data.get('name', '')).strip()[:15]
+    points = int(data.get('points', 0))
+    if not name:
+        return web.json_response({'error': 'Name required'}, status=400)
+    if points < 0 or points > 3:
+        return web.json_response({'error': 'Invalid points'}, status=400)
+
+    board = load_scoreboard()
+    if 'puzzles' not in board:
+        board['puzzles'] = []
+
+    entries = board['puzzles']
+    existing = next((e for e in entries if e['name'].lower() == name.lower()), None)
+    if existing:
+        existing['points'] += points
+        existing['setsCompleted'] += 1
+    else:
+        entries.append({'name': name, 'points': points, 'setsCompleted': 1})
+    entries.sort(key=lambda e: e['points'], reverse=True)
     save_scoreboard(board)
     return web.json_response({'ok': True})
 
@@ -594,6 +668,8 @@ app.router.add_post('/api/auth/login', login_user)
 app.router.add_get('/scoreboard', get_scoreboard)
 app.router.add_post('/scoreboard/single', post_single_score)
 app.router.add_post('/scoreboard/multi', post_multi_score)
+app.router.add_post('/scoreboard/mode', post_mode_score)
+app.router.add_post('/scoreboard/puzzle', post_puzzle_score)
 app.router.add_get('/password/exists', check_password_exists)
 app.router.add_post('/password/set', set_password)
 app.router.add_post('/password/verify', verify_password)

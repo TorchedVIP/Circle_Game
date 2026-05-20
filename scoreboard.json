@@ -2,12 +2,12 @@
   "singlePlayer": {
     "easy": [
       {
-        "name": "VIP",
-        "wins": 5
+        "name": "L0n3W01f",
+        "wins": 13
       },
       {
-        "name": "L0n3W01f",
-        "wins": 3
+        "name": "VIP",
+        "wins": 5
       }
     ],
     "medium": [
@@ -27,7 +27,7 @@
     "hard": [
       {
         "name": "VIP",
-        "wins": 74
+        "wins": 75
       },
       {
         "name": "Sawyer",
@@ -97,7 +97,9 @@
       "slayer",
       "wolf_slayer",
       "crazy_taxi",
-      "theme_golden"
+      "theme_golden",
+      "perfect_puzzle",
+      "stopwatch_puzzle"
     ],
     "nerd": [
       "novice"
@@ -118,5 +120,12 @@
       "displayName": "triuser",
       "passwordHash": "a665a45920422f9d417e4867efdc4fb8a04a1f3fff1fa07e998e86f7f7a27ae3"
     }
-  }
+  },
+  "puzzles": [
+    {
+      "name": "VIP",
+      "points": 31,
+      "setsCompleted": 11
+    }
+  ]
 }

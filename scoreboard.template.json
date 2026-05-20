@@ -1,6 +1,9 @@
 {
   "singlePlayer": { "easy": [], "medium": [], "hard": [] },
   "multiplayer": [],
+  "modes": {},
+  "puzzles": [],
   "passwords": {},
-  "achievements": {}
+  "achievements": {},
+  "users": {}
 }

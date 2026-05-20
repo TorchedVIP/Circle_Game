@@ -348,9 +348,9 @@
         }
 
         .mode-btn.active {
-            background: #667eea;
+            background: #2ecc71;
             color: white;
-            border-color: #667eea;
+            border-color: #2ecc71;
         }
 
         .mode-btn:hover {
@@ -396,7 +396,7 @@
 
         /* Scoreboard modal */
         .scoreboard-modal {
-            max-width: 520px !important;
+            max-width: 600px !important;
             max-height: 90vh;
             overflow-y: auto;
             text-align: left;
@@ -411,6 +411,7 @@
             gap: 8px;
             margin-bottom: 20px;
             justify-content: center;
+            flex-wrap: wrap;
         }
 
         .tab-btn {
@@ -918,7 +919,7 @@
 
             <div class="login-field">
                 <label>Username</label>
-                <input type="text" id="loginUsername" placeholder="Choose a name" maxlength="20">
+                <input type="text" id="loginUsername" placeholder="Choose a name" maxlength="15">
             </div>
 
             <div class="login-actions">
@@ -929,6 +930,7 @@
             <div class="login-error" id="loginError"></div>
 
             <div class="login-note">
+                Username must be under 15 characters.<br>
                 Your password is a pattern on the game's triangle — no typing needed.
             </div>
         </div>
@@ -942,10 +944,15 @@
                         <button class="mode-btn active" onclick="setGameMode('single', this)">Play vs Computer</button>
                         <button class="mode-btn" onclick="setGameMode('local', this)">2 Players (One Device)</button>
                         <button class="mode-btn" onclick="setGameMode('multi', this)">Play Online</button>
+                        <button class="mode-btn hidden" id="puzzleModeBtn" onclick="setGameMode('puzzle', this)">🧩 Puzzles</button>
                     </div>
 
             <!-- Single Player Options -->
             <div id="singlePlayerOptions">
+                <div style="display:flex; gap:10px; margin-bottom:16px;">
+                    <button onclick="previewSelectedMap('single')" style="flex:1; background:#f0f0f0; color:#333; border:2px solid #ddd;">👁️ Preview Map</button>
+                    <button onclick="startSinglePlayer()" style="flex:1; background:#667eea; color:white;">▶ Start Game</button>
+                </div>
                 <div style="margin: 20px 0;">
                     <div style="font-weight: bold; margin-bottom: 10px; color: #333;">Difficulty:</div>
                     <label style="display: block; margin: 10px 0; font-size: 16px;">
@@ -1075,14 +1082,14 @@
                     </div>
                     <button onclick="openMapEditor()" style="margin-top:8px; background:#2196f3; color:white; padding:8px 14px; font-size:13px;">Open Editor</button>
                 </div>
-                <div style="display:flex; gap:10px; margin-top:10px;">
-                    <button onclick="previewSelectedMap('single')" style="flex:1; background:#f0f0f0; color:#333; border:2px solid #ddd;">👁️ Preview Map</button>
-                    <button onclick="startSinglePlayer()" style="flex:1; background:#667eea; color:white;">▶ Start Game</button>
-                </div>
             </div>
 
             <!-- Local 2-Player Options -->
             <div id="localOptions" class="hidden">
+                <div style="display:flex; gap:10px; margin-bottom:16px;">
+                    <button onclick="previewSelectedMap('local')" style="flex:1; background:#f0f0f0; color:#333; border:2px solid #ddd;">👁️ Preview</button>
+                    <button onclick="oneDeviceMulti()" style="flex:1; background:#667eea; color:white;">▶ Start Game</button>
+                </div>
                 <div class="name-input-group" style="margin-top: 10px;">
                     <div class="label">Player 2 name:</div>
                     <input type="text" id="localPlayer2Name" class="name-text-input" placeholder="Enter Player 2 name" maxlength="20">
@@ -1165,14 +1172,15 @@
                         After each move, pick a side to cascade-remove upward.
                     </div>
                 </div>
-                <div style="display:flex; gap:10px; margin-top:10px;">
-                    <button onclick="previewSelectedMap('local')" style="flex:1; background:#f0f0f0; color:#333; border:2px solid #ddd;">👁️ Preview</button>
-                    <button onclick="oneDeviceMulti()" style="flex:1; background:#667eea; color:white;">▶ Start Game</button>
-                </div>
             </div>
 
             <!-- Multiplayer Options -->
             <div id="multiplayerOptions" class="hidden">
+                <div style="display:flex; gap:10px; margin-bottom:16px;">
+                    <button onclick="previewSelectedMap('multi')" style="flex:1; background:#f0f0f0; color:#333; border:2px solid #ddd;">👁️ Preview</button>
+                    <button onclick="createMultiplayerGame()" style="flex:1; background:#27ae60; color:white;">Create Game</button>
+                    <button onclick="joinMultiplayerGame()" style="flex:1; background:#3498db; color:white;">Join Game</button>
+                </div>
                 <div style="margin: 20px 0;">
                     <div style="font-weight: bold; margin-bottom: 10px; color: #333;">Map (when creating):</div>
                     <label style="display: block; margin: 10px 0; font-size: 16px;">
@@ -1252,11 +1260,18 @@
                     </div>
                 </div>
                 <!-- <button onclick="oneDeviceMulti()" style="background: #667eea; color: white;">Play on One Device</button> -->
-                <div style="display:flex; gap:10px; margin-top:10px;">
-                    <button onclick="previewSelectedMap('multi')" style="flex:1; background:#f0f0f0; color:#333; border:2px solid #ddd;">👁️ Preview</button>
-                    <button onclick="createMultiplayerGame()" style="flex:1; background:#27ae60; color:white;">Create Game</button>
-                    <button onclick="joinMultiplayerGame()" style="flex:1; background:#3498db; color:white;">Join Game</button>
+            </div>
+
+            <!-- Puzzle Mode Options -->
+            <div id="puzzleOptions" class="hidden">
+                <div style="margin-bottom:16px; text-align:center;">
+                    <h3 style="color:#333; margin-bottom:8px;">🧩 Nim Puzzles</h3>
+                    <p style="color:#666; font-size:14px; line-height:1.5;">
+                        You'll see a board where the position is <strong>not</strong> safe. Find the move that puts you in a winning position.<br>
+                        Solve 5 puzzles per set. Score: 5/5 = 3pts, 4/5 = 2pts, 3/5 = 1pt.
+                    </p>
                 </div>
+                <button onclick="startPuzzleSet()" style="width:100%; background:#667eea; color:white; padding:15px; font-size:16px;">▶ Start Puzzle Set</button>
             </div>
 
             <div class="info-text">
@@ -1367,6 +1382,13 @@
             <div class="score-tabs">
                 <button class="tab-btn active" onclick="switchScoreTab('single', this)">vs Computer</button>
                 <button class="tab-btn" onclick="switchScoreTab('multi', this)">Multiplayer</button>
+                <button class="tab-btn" onclick="switchScoreTab('modes', this)">Modes</button>
+                <button class="tab-btn" onclick="switchScoreTab('puzzles', this)">Puzzles</button>
+            </div>
+            <div style="text-align:center; font-size:12px; color:#888; margin-bottom:14px; line-height:1.5;">
+                🏅 Hold #1 on any board → <span style="color:#e74c3c;">red-black</span> theme &nbsp;|&nbsp;
+                #2 → <span style="color:#74b9ff;">blue-black</span> &nbsp;|&nbsp;
+                #3 → <span style="color:#d4a574;">brown-black</span>
             </div>
 
             <div id="singleScoreTab">
@@ -1397,6 +1419,17 @@
                 <table class="score-table">
                     <thead><tr><th>#</th><th>Name</th><th>Wins</th><th>Played</th><th>Fastest</th></tr></thead>
                     <tbody id="score-multi"></tbody>
+                </table>
+            </div>
+
+            <div id="modesScoreTab" class="hidden">
+                <div id="modesScoreContent"><p style="text-align:center;color:#aaa;">Loading...</p></div>
+            </div>
+
+            <div id="puzzlesScoreTab" class="hidden">
+                <table class="score-table">
+                    <thead><tr><th>#</th><th>Name</th><th>Points</th><th>Sets</th></tr></thead>
+                    <tbody id="score-puzzles"></tbody>
                 </table>
             </div>
 

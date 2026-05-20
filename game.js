@@ -114,6 +114,11 @@ async function submitRegister() {
         return;
     }
 
+    if (username.length > 15) {
+        errorEl.textContent = 'Username must be under 15 characters';
+        return;
+    }
+
     try {
         // Check if username already exists
         const checkRes = await fetch(`/password/exists?name=${encodeURIComponent(username)}`);
@@ -391,6 +396,7 @@ function setGameMode(mode, button) {
     document.getElementById('singlePlayerOptions').classList.toggle('hidden', mode !== 'single');
     document.getElementById('localOptions').classList.toggle('hidden', mode !== 'local');
     document.getElementById('multiplayerOptions').classList.toggle('hidden', mode !== 'multi');
+    document.getElementById('puzzleOptions').classList.toggle('hidden', mode !== 'puzzle');
 }
 
 // Helper: check if a mode option is visible and its checkbox is checked
@@ -1933,6 +1939,21 @@ async function recordSinglePlayerWin(name, difficulty) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ name, difficulty })
         });
+        // Also record mode-specific wins
+        const activeModes = [];
+        if (gameState.diceMode) activeModes.push('dice');
+        if (gameState.doublesMode) activeModes.push('doubles');
+        if (gameState.armourMode) activeModes.push('armour');
+        if (gameState.portalMode) activeModes.push('portal');
+        if (gameState.sandMode) activeModes.push('sand');
+        if (gameState.cascadeMode) activeModes.push('cascade');
+        for (const mode of activeModes) {
+            fetch('/scoreboard/mode', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name, mode })
+            }).catch(() => {});
+        }
         refreshUnlocks();
     } catch (e) {
         console.error('Failed to record score:', e);
@@ -1966,12 +1987,19 @@ async function showScoreboard() {
     });
     document.getElementById('score-multi').innerHTML =
         '<tr class="empty-row"><td colspan="5">Loading...</td></tr>';
+    document.getElementById('score-puzzles').innerHTML =
+        '<tr class="empty-row"><td colspan="4">Loading...</td></tr>';
+    document.getElementById('modesScoreContent').innerHTML =
+        '<p style="text-align:center;color:#aaa;">Loading...</p>';
 
     try {
         const res = await fetch('/scoreboard');
         const board = await res.json();
         renderSingleScore(board);
         renderMultiScore(board);
+        renderModesScore(board);
+        renderPuzzlesScore(board);
+        checkLeaderboardThemes(board);
     } catch (e) {
         console.error('Failed to load scoreboard:', e);
     }
@@ -1986,7 +2014,12 @@ function switchScoreTab(tab, btn) {
     btn.classList.add('active');
     document.getElementById('singleScoreTab').classList.toggle('hidden', tab !== 'single');
     document.getElementById('multiScoreTab').classList.toggle('hidden', tab !== 'multi');
+    document.getElementById('modesScoreTab').classList.toggle('hidden', tab !== 'modes');
+    document.getElementById('puzzlesScoreTab').classList.toggle('hidden', tab !== 'puzzles');
 }
+
+// Trophies for top 3 positions (excluding VIP from ranking)
+const RANK_TROPHIES = ['🥇', '🥈', '🥉'];
 
 function renderSingleScore(board) {
     ['easy', 'medium', 'hard'].forEach(diff => {
@@ -1995,11 +2028,35 @@ function renderSingleScore(board) {
         const entries = board.singlePlayer[diff];
         if (entries.length === 0) {
             tbody.innerHTML = '<tr class="empty-row"><td colspan="3">No games yet</td></tr>';
-        } else {
-            tbody.innerHTML = entries.slice(0, 10).map((e, i) =>
-                `<tr><td>${i + 1}</td><td>${e.name}</td><td>${e.wins}</td></tr>`
-            ).join('');
+            return;
         }
+
+        const withoutVip = entries.filter(e => e.name.toLowerCase() !== 'vip');
+        const vipEntry = entries.find(e => e.name.toLowerCase() === 'vip');
+        const vipRank = vipEntry ? entries.indexOf(vipEntry) + 1 : -1;
+
+        let html = '';
+        let rank = 0;
+        const shown = withoutVip.slice(0, 10);
+        let vipInserted = false;
+
+        for (let i = 0; i < shown.length; i++) {
+            rank = i + 1;
+            // Insert VIP at their natural position if top 3
+            if (vipEntry && !vipInserted && vipRank <= 3 && vipRank <= rank) {
+                html += `<tr style="opacity:0.7;"><td>${vipRank}</td><td>VIP</td><td>${vipEntry.wins}</td></tr>`;
+                vipInserted = true;
+            }
+            const trophy = rank <= 3 ? RANK_TROPHIES[rank - 1] : rank;
+            const beatsVip = vipEntry && entries.indexOf(shown[i]) < entries.indexOf(vipEntry);
+            const style = beatsVip ? 'color:#e74c3c; font-weight:bold;' : '';
+            html += `<tr><td>${trophy}</td><td style="${style}">${shown[i].name}</td><td>${shown[i].wins}</td></tr>`;
+        }
+        // If VIP is top 3 but hasn't been inserted yet (e.g. they're last)
+        if (vipEntry && !vipInserted && vipRank <= 3) {
+            html += `<tr style="opacity:0.7;"><td>${vipRank}</td><td>VIP</td><td>${vipEntry.wins}</td></tr>`;
+        }
+        tbody.innerHTML = html;
     });
 }
 
@@ -2009,17 +2066,171 @@ function renderMultiScore(board) {
     const entries = board.multiplayer;
     if (entries.length === 0) {
         tbody.innerHTML = '<tr class="empty-row"><td colspan="5">No games yet</td></tr>';
-    } else {
-        tbody.innerHTML = entries.slice(0, 10).map((e, i) =>
-            `<tr>
-                <td>${i + 1}</td>
-                <td>${e.name}</td>
-                <td>${e.wins}</td>
-                <td>${e.gamesPlayed}</td>
-                <td>${e.fastestTime !== null ? formatTime(e.fastestTime) : '—'}</td>
-            </tr>`
-        ).join('');
+        return;
     }
+
+    const withoutVip = entries.filter(e => e.name.toLowerCase() !== 'vip');
+    const vipEntry = entries.find(e => e.name.toLowerCase() === 'vip');
+    const vipRank = vipEntry ? entries.indexOf(vipEntry) + 1 : -1;
+
+    let html = '';
+    let rank = 0;
+    const shown = withoutVip.slice(0, 10);
+    let vipInserted = false;
+
+    for (let i = 0; i < shown.length; i++) {
+        rank = i + 1;
+        if (vipEntry && !vipInserted && vipRank <= 3 && vipRank <= rank) {
+            html += `<tr style="opacity:0.7;"><td>${vipRank}</td><td>VIP</td><td>${vipEntry.wins}</td><td>${vipEntry.gamesPlayed}</td><td>${vipEntry.fastestTime !== null ? formatTime(vipEntry.fastestTime) : '—'}</td></tr>`;
+            vipInserted = true;
+        }
+        const trophy = rank <= 3 ? RANK_TROPHIES[rank - 1] : rank;
+        const beatsVip = vipEntry && entries.indexOf(shown[i]) < entries.indexOf(vipEntry);
+        const style = beatsVip ? 'color:#e74c3c; font-weight:bold;' : '';
+        html += `<tr><td>${trophy}</td><td style="${style}">${shown[i].name}</td><td>${shown[i].wins}</td><td>${shown[i].gamesPlayed}</td><td>${shown[i].fastestTime !== null ? formatTime(shown[i].fastestTime) : '—'}</td></tr>`;
+    }
+    if (vipEntry && !vipInserted && vipRank <= 3) {
+        html += `<tr style="opacity:0.7;"><td>${vipRank}</td><td>VIP</td><td>${vipEntry.wins}</td><td>${vipEntry.gamesPlayed}</td><td>${vipEntry.fastestTime !== null ? formatTime(vipEntry.fastestTime) : '—'}</td></tr>`;
+    }
+    tbody.innerHTML = html;
+}
+
+function renderModesScore(board) {
+    const container = document.getElementById('modesScoreContent');
+    if (!container) return;
+    const modes = board.modes || {};
+    const modeNames = { dice: '🎲 Dice', doubles: '🎯 Doubles', armour: '🔴 Armour', portal: '🌀 Portal', sand: '🏜️ Sand', cascade: '⚡ Cascade', puzzle: '🧩 Puzzle' };
+    const modeKeys = Object.keys(modes).filter(k => modes[k].length > 0);
+
+    if (modeKeys.length === 0) {
+        container.innerHTML = '<p style="text-align:center;color:#aaa;">No mode wins yet</p>';
+        return;
+    }
+
+    container.innerHTML = modeKeys.map(mode => {
+        const entries = modes[mode];
+        const withoutVip = entries.filter(e => e.name.toLowerCase() !== 'vip').slice(0, 5);
+        const vipEntry = entries.find(e => e.name.toLowerCase() === 'vip');
+        const vipRank = vipEntry ? entries.indexOf(vipEntry) + 1 : -1;
+        const title = modeNames[mode] || mode;
+
+        let rows = '';
+        let vipInserted = false;
+        for (let i = 0; i < withoutVip.length; i++) {
+            const rank = i + 1;
+            if (vipEntry && !vipInserted && vipRank <= 3 && vipRank <= rank) {
+                rows += `<tr style="opacity:0.7;"><td>${vipRank}</td><td>VIP</td><td>${vipEntry.wins}</td></tr>`;
+                vipInserted = true;
+            }
+            const trophy = rank <= 3 ? RANK_TROPHIES[rank - 1] : rank;
+            const beatsVip = vipEntry && entries.indexOf(withoutVip[i]) < entries.indexOf(vipEntry);
+            const style = beatsVip ? 'color:#e74c3c; font-weight:bold;' : '';
+            rows += `<tr><td>${trophy}</td><td style="${style}">${withoutVip[i].name}</td><td>${withoutVip[i].wins}</td></tr>`;
+        }
+        if (vipEntry && !vipInserted && vipRank <= 3) {
+            rows += `<tr style="opacity:0.7;"><td>${vipRank}</td><td>VIP</td><td>${vipEntry.wins}</td></tr>`;
+        }
+
+        return `<div class="score-section"><h3>${title}</h3><table class="score-table"><thead><tr><th>#</th><th>Name</th><th>Wins</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+    }).join('');
+}
+
+function renderPuzzlesScore(board) {
+    const tbody = document.getElementById('score-puzzles');
+    if (!tbody) return;
+    const entries = board.puzzles || [];
+    if (entries.length === 0) {
+        tbody.innerHTML = '<tr class="empty-row"><td colspan="4">No puzzles completed yet</td></tr>';
+        return;
+    }
+
+    const withoutVip = entries.filter(e => e.name.toLowerCase() !== 'vip').slice(0, 10);
+    const vipEntry = entries.find(e => e.name.toLowerCase() === 'vip');
+    const vipRank = vipEntry ? entries.indexOf(vipEntry) + 1 : -1;
+
+    let html = '';
+    let vipInserted = false;
+    for (let i = 0; i < withoutVip.length; i++) {
+        const rank = i + 1;
+        if (vipEntry && !vipInserted && vipRank <= 3 && vipRank <= rank) {
+            html += `<tr style="opacity:0.7;"><td>${vipRank}</td><td>VIP</td><td>${vipEntry.points}</td><td>${vipEntry.setsCompleted}</td></tr>`;
+            vipInserted = true;
+        }
+        const trophy = rank <= 3 ? RANK_TROPHIES[rank - 1] : rank;
+        const beatsVip = vipEntry && entries.indexOf(withoutVip[i]) < entries.indexOf(vipEntry);
+        const style = beatsVip ? 'color:#e74c3c; font-weight:bold;' : '';
+        html += `<tr><td>${trophy}</td><td style="${style}">${withoutVip[i].name}</td><td>${withoutVip[i].points}</td><td>${withoutVip[i].setsCompleted}</td></tr>`;
+    }
+    if (vipEntry && !vipInserted && vipRank <= 3) {
+        html += `<tr style="opacity:0.7;"><td>${vipRank}</td><td>VIP</td><td>${vipEntry.points}</td><td>${vipEntry.setsCompleted}</td></tr>`;
+    }
+    tbody.innerHTML = html;
+}
+
+function checkLeaderboardThemes(board) {
+    if (!currentUser) return;
+    const name = currentUser.username.toLowerCase();
+
+    // VIP always has access to all leaderboard themes
+    if (name === 'vip') {
+        const unlocked = getUnlockedThemes();
+        if (!unlocked.includes('champion')) unlocked.push('champion');
+        if (!unlocked.includes('silver')) unlocked.push('silver');
+        if (!unlocked.includes('bronze')) unlocked.push('bronze');
+        localStorage.setItem('circleGameUnlockedThemes', JSON.stringify(unlocked));
+        renderUnlockedThemes();
+        return;
+    }
+
+    // Collect all leaderboards into one list of sorted arrays
+    const leaderboards = [];
+    for (const diff of ['easy', 'medium', 'hard']) {
+        const entries = board.singlePlayer?.[diff] || [];
+        if (entries.length > 0) leaderboards.push(entries);
+    }
+    if ((board.multiplayer || []).length > 0) leaderboards.push(board.multiplayer);
+    if ((board.puzzles || []).length > 0) leaderboards.push(board.puzzles);
+    for (const mode of Object.keys(board.modes || {})) {
+        if (board.modes[mode].length > 0) leaderboards.push(board.modes[mode]);
+    }
+
+    // Check position on each leaderboard (skip VIP entries)
+    let bestPosition = 999;
+    for (const entries of leaderboards) {
+        const filtered = entries.filter(e => e.name.toLowerCase() !== 'vip');
+        for (let i = 0; i < Math.min(3, filtered.length); i++) {
+            if (filtered[i].name.toLowerCase() === name) {
+                bestPosition = Math.min(bestPosition, i + 1);
+            }
+        }
+    }
+
+    // Grant/revoke themes based on current position
+    const unlocked = getUnlockedThemes();
+    const currentTheme = localStorage.getItem('circleGameTheme') || 'classic';
+
+    // Remove leaderboard themes if no longer holding position
+    const lbThemes = ['champion', 'silver', 'bronze'];
+    for (const t of lbThemes) {
+        const idx = unlocked.indexOf(t);
+        if (idx !== -1) unlocked.splice(idx, 1);
+    }
+
+    // Grant based on best position
+    if (bestPosition === 1) unlocked.push('champion');
+    if (bestPosition <= 2) unlocked.push('silver');
+    if (bestPosition <= 3) unlocked.push('bronze');
+
+    localStorage.setItem('circleGameUnlockedThemes', JSON.stringify(unlocked));
+
+    // If current theme was a leaderboard theme they no longer have, reset to classic
+    if (lbThemes.includes(currentTheme) && !unlocked.includes(currentTheme)) {
+        localStorage.setItem('circleGameTheme', 'classic');
+        const theme = loadedThemes.find(t => t.code === 'classic');
+        if (theme) document.body.style.background = theme.background;
+    }
+
+    renderUnlockedThemes();
 }
 
 // ============ UNLOCK CHECKS ============
@@ -2085,6 +2296,13 @@ async function refreshUnlocks() {
         if (customEl) {
             if (wins >= 5) customEl.classList.remove('hidden');
             else customEl.classList.add('hidden');
+        }
+
+        // Puzzle mode unlock
+        const puzzleBtn = document.getElementById('puzzleModeBtn');
+        if (puzzleBtn) {
+            if (wins >= 5) puzzleBtn.classList.remove('hidden');
+            else puzzleBtn.classList.add('hidden');
         }
 
     } catch (e) {
@@ -2418,14 +2636,14 @@ const TUTORIALS = {
         unlockWins: 20,
         steps: [
             {
-                title: 'Column removal',
-                desc: 'Take the <strong>entire bottom row</strong> (all 3 circles in Row 3). Then pick <strong>Leftmost</strong> — it will also remove position 1 from rows above!',
+                title: 'Clear the bottom row',
+                desc: 'Take <strong>all 3 circles</strong> from Row 3. Then you\'ll pick a side — the cascade removes that column from the rows above.',
                 map: { 1: [0], 2: [0, 0], 3: [0, 0, 0] },
-                cascadeEnabled: true,
                 validate: (rows, r, pos) => {
                     return r === 3 && pos.length === 3;
                 },
-                successMsg: 'The cascade removed circles above! Powerful move. ✅'
+                successMsg: 'Row cleared! Now pick a side...',
+                cascadePicker: true
             },
             {
                 title: 'Try it out!',
@@ -2810,7 +3028,51 @@ function startTutorialMiniGame(step, area) {
             document.getElementById('tutorialMsg').textContent = step.successMsg;
             submitBtn.disabled = true;
             resetBtn.disabled = true;
-            setTimeout(() => advanceTutorial(), 1200);
+
+            // Cascade picker: show left/right choice after the move
+            if (step.cascadePicker) {
+                setTimeout(() => {
+                    const msg = document.getElementById('tutorialMsg');
+                    msg.textContent = '';
+                    const picker = document.createElement('div');
+                    picker.style.cssText = 'margin-top:12px; padding:14px; background:#e8f0fe; border:2px solid #667eea; border-radius:10px; text-align:center;';
+                    picker.innerHTML = '<p style="font-weight:bold; margin-bottom:10px; color:#333;">⚡ Pick which side cascades upward:</p>';
+
+                    const btnLeft = document.createElement('button');
+                    btnLeft.textContent = 'Leftmost (col 1)';
+                    btnLeft.style.cssText = 'margin:4px 8px; background:#667eea; color:white; padding:8px 18px; border-radius:8px; border:none; cursor:pointer; font-size:15px;';
+                    btnLeft.onclick = () => {
+                        // Left cascade: remove col 0 from rows above (row 1 pos 0, row 2 pos 0)
+                        if (miniRows[1] && miniRows[1][0] === 0) miniRows[1][0] = 1;
+                        if (miniRows[2] && miniRows[2][0] === 0) miniRows[2][0] = 1;
+                        picker.remove();
+                        renderMini();
+                        document.getElementById('tutorialMsg').textContent = 'Cascade removed column 1 from rows above! ✅';
+                        setTimeout(() => advanceTutorial(), 1500);
+                    };
+
+                    const btnRight = document.createElement('button');
+                    btnRight.textContent = 'Rightmost (col 3)';
+                    btnRight.style.cssText = 'margin:4px 8px; background:#764ba2; color:white; padding:8px 18px; border-radius:8px; border:none; cursor:pointer; font-size:15px;';
+                    btnRight.onclick = () => {
+                        // Right cascade: remove col 2 from rows above (row 2 pos 1 if it exists)
+                        // Row 1 only has 1 circle (pos 0), col 2 doesn't exist there
+                        if (miniRows[2] && miniRows[2].length > 2 && miniRows[2][2] === 0) miniRows[2][2] = 1;
+                        if (miniRows[2] && miniRows[2][1] === 0) miniRows[2][1] = 1;
+                        picker.remove();
+                        renderMini();
+                        document.getElementById('tutorialMsg').textContent = 'Cascade removed column 3 from rows above! ✅';
+                        setTimeout(() => advanceTutorial(), 1500);
+                    };
+
+                    picker.appendChild(btnLeft);
+                    picker.appendChild(btnRight);
+                    const boardEl = document.getElementById('tutorialMiniBoard');
+                    boardEl.parentNode.insertBefore(picker, boardEl.nextSibling);
+                }, 800);
+            } else {
+                setTimeout(() => advanceTutorial(), 1200);
+            }
         }
     };
 
@@ -2961,10 +3223,13 @@ const ACHIEVEMENT_DEFS = [
     { id: 'slippery',        name: 'Slippery',               desc: 'Unlock Sand mode (15+ wins)' },
     { id: 'demoman',         name: 'Demoman',                desc: 'Unlock Cascade mode (20+ wins)' },
     { id: 'oops',            name: 'Oops',                   desc: 'Play against VIP', secret: true },
-    { id: 'wolf_slayer',     name: 'Wolf Slayer',             desc: 'Beat L0n3W01f in multiplayer' },
-    { id: 'crazy_taxi',      name: 'CrAZy tAxi',             desc: 'Win with ALL modifiers on at once' },
+    { id: 'wolf_slayer',     name: 'Wolf Slayer',            desc: 'Beat L0n3W01f in multiplayer' },
+    { id: 'crazy_taxi',      name: 'CrAZy tAxi',            desc: 'Win with ALL modifiers on at once' },
     { id: 'tough_luck',      name: 'Tough Luck',             desc: 'Lose to a kill circle' },
-    { id: 'slayer',          name: 'Slayer',                  desc: 'Take 6 circles in one move, 3 times' },
+    { id: 'slayer',          name: 'Slayer',                 desc: 'Take 6 circles in one move, 3 times' },
+    { id: 'perfect_puzzle',  name: 'Perfect',                desc: 'Get 5/5 on a puzzle set' },
+    { id: 'stopwatch_puzzle',name: 'Stopwatch',              desc: 'Finish a puzzle set perfectly in under 20 seconds' },
+    { id: 'puzzle_connoisseur', name: 'Puzzle Connoisseur',  desc: 'Complete 10 puzzle sets' },
     { id: 'golden',          name: 'Golden',                 desc: '50+ total wins', hidden: true },
     { id: 'secret_skin',     name: '???',                    desc: 'A secret achievement...', hidden: true },
 ];
@@ -3423,6 +3688,302 @@ function secretTitleClick() {
             title.textContent = '⭕ Circle Game';
         }
     }
+}
+
+// ============ PUZZLE MODE ============
+let puzzleState = {
+    puzzles: [],       // array of 5 puzzle boards
+    currentPuzzle: 0,  // index 0-4
+    correct: 0,        // how many solved correctly
+    active: false,
+    selected: {}
+};
+
+function generatePuzzle() {
+    // Generate a classic map (rows 1-5) with some circles already removed
+    // such that XOR != 0 (solvable position for the player)
+    const rows = { 1: [0], 2: [0, 0], 3: [0, 0, 0], 4: [0, 0, 0, 0], 5: [0, 0, 0, 0, 0] };
+
+    // Randomly remove some circles (1-6 removals) to create an interesting position
+    const allPositions = [];
+    for (const r of Object.keys(rows)) {
+        for (let i = 0; i < rows[r].length; i++) {
+            allPositions.push({ row: parseInt(r), pos: i });
+        }
+    }
+
+    // Shuffle and remove 1-6 circles
+    const numRemove = 1 + Math.floor(Math.random() * 6);
+    const shuffled = allPositions.sort(() => Math.random() - 0.5);
+    for (let i = 0; i < numRemove && i < shuffled.length; i++) {
+        rows[shuffled[i].row][shuffled[i].pos] = 1;
+    }
+
+    // Check XOR — if it's already 0, remove one more or add one back to make it non-zero
+    let nimSum = computeNimSumFromRows(rows);
+    if (nimSum === 0) {
+        // Find a circle that's still present and remove it
+        for (const p of shuffled.slice(numRemove)) {
+            if (rows[p.row][p.pos] === 0) {
+                rows[p.row][p.pos] = 1;
+                nimSum = computeNimSumFromRows(rows);
+                if (nimSum !== 0) break;
+                rows[p.row][p.pos] = 0; // revert if still 0
+            }
+        }
+    }
+
+    // If still 0 (unlikely), just regenerate
+    if (nimSum === 0) return generatePuzzle();
+
+    // Make sure there's at least 2 circles remaining
+    let remaining = 0;
+    for (const r of Object.keys(rows)) {
+        for (const v of rows[r]) { if (v === 0) remaining++; }
+    }
+    if (remaining < 2) return generatePuzzle();
+
+    return rows;
+}
+
+function computeNimSumFromRows(rows) {
+    let nimSum = 0;
+    for (const row of Object.keys(rows)) {
+        const segs = getSegments(rows[row]);
+        for (const s of segs) nimSum ^= s;
+    }
+    return nimSum;
+}
+
+function startPuzzleSet() {
+    if (!currentUser) { alert('Please login first'); return; }
+
+    puzzleState.puzzles = [];
+    puzzleState.currentPuzzle = 0;
+    puzzleState.correct = 0;
+    puzzleState.active = true;
+    puzzleState.selected = {};
+    puzzleState.startTime = Date.now();
+
+    for (let i = 0; i < 5; i++) {
+        puzzleState.puzzles.push(generatePuzzle());
+    }
+
+    document.getElementById('mainMenuScreen').classList.add('hidden');
+    document.getElementById('gameScreen').classList.remove('hidden');
+    renderPuzzle();
+}
+
+function renderPuzzle() {
+    const rows = puzzleState.puzzles[puzzleState.currentPuzzle];
+    const board = document.getElementById('board');
+    board.innerHTML = '';
+
+    // Progress bar
+    let progressBar = document.getElementById('puzzleProgress');
+    if (!progressBar) {
+        progressBar = document.createElement('div');
+        progressBar.id = 'puzzleProgress';
+        progressBar.style.cssText = 'width:100%; height:32px; background:#eee; border-radius:8px; margin-bottom:16px; position:relative; overflow:hidden;';
+        board.parentNode.insertBefore(progressBar, board);
+    }
+    const pct = ((puzzleState.currentPuzzle) / 5) * 100;
+    progressBar.innerHTML = `<div style="position:absolute;top:0;left:0;height:100%;width:${pct}%;background:linear-gradient(90deg,#667eea,#764ba2);border-radius:8px;transition:width 0.3s;"></div><div style="position:absolute;top:0;left:0;width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:bold;color:#333;">${puzzleState.currentPuzzle + 1} / 5</div>`;
+
+    const rowNums = Object.keys(rows).map(Number).sort((a, b) => a - b);
+    for (const rowNum of rowNums) {
+        const rowDiv = document.createElement('div');
+        rowDiv.className = 'row';
+
+        const label = document.createElement('div');
+        label.className = 'row-label';
+        label.textContent = `Row ${rowNum}`;
+        rowDiv.appendChild(label);
+
+        const circlesDiv = document.createElement('div');
+        circlesDiv.className = 'circles';
+
+        for (let i = 0; i < rows[rowNum].length; i++) {
+            const circle = document.createElement('div');
+            circle.className = 'circle';
+            const key = `${rowNum}-${i}`;
+
+            if (rows[rowNum][i] === 1) {
+                circle.classList.add('removed');
+            } else {
+                if (puzzleState.selected[key]) {
+                    circle.classList.add('selected');
+                }
+                circle.onclick = () => togglePuzzleCircle(rowNum, i);
+            }
+            circlesDiv.appendChild(circle);
+        }
+
+        rowDiv.appendChild(circlesDiv);
+        board.appendChild(rowDiv);
+    }
+
+    // Update game state display
+    const stateDiv = document.getElementById('gameState');
+    stateDiv.className = 'player-turn';
+    stateDiv.textContent = '🧩 Find the winning move — remove circles to reach a safe position';
+
+    document.getElementById('submitBtn').disabled = false;
+    document.getElementById('submitBtn').onclick = submitPuzzleMove;
+    document.getElementById('replayBtn').classList.add('hidden');
+    document.getElementById('mainMenuBtn').onclick = exitPuzzleMode;
+
+    // Remove old XOR info if present
+    const oldInfo = document.getElementById('puzzleXorInfo');
+    if (oldInfo) oldInfo.remove();
+}
+
+function togglePuzzleCircle(row, pos) {
+    if (!puzzleState.active) return;
+
+    const key = `${row}-${pos}`;
+    const rows = puzzleState.puzzles[puzzleState.currentPuzzle];
+    if (rows[row][pos] === 1) return;
+
+    if (puzzleState.selected[key]) {
+        delete puzzleState.selected[key];
+        renderPuzzle();
+        return;
+    }
+
+    // Enforce same-row, contiguous selection (same rules as the game)
+    const selectedRows = new Set(Object.keys(puzzleState.selected).map(k => k.split('-')[0]));
+    if (selectedRows.size > 0 && !selectedRows.has(String(row))) {
+        puzzleState.selected = {};
+    }
+
+    const currentSelection = Object.keys(puzzleState.selected)
+        .filter(k => k.split('-')[0] === String(row))
+        .map(k => parseInt(k.split('-')[1]))
+        .sort((a, b) => a - b);
+
+    if (currentSelection.length === 0) {
+        puzzleState.selected[key] = true;
+    } else {
+        const min = Math.min(...currentSelection);
+        const max = Math.max(...currentSelection);
+
+        if (pos < min) {
+            let blocked = false;
+            for (let i = pos; i < min; i++) { if (rows[row][i] === 1) { blocked = true; break; } }
+            if (blocked) { puzzleState.selected = { [key]: true }; }
+            else { for (let i = pos; i < min; i++) puzzleState.selected[`${row}-${i}`] = true; }
+        } else if (pos > max) {
+            let blocked = false;
+            for (let i = max + 1; i <= pos; i++) { if (rows[row][i] === 1) { blocked = true; break; } }
+            if (blocked) { puzzleState.selected = { [key]: true }; }
+            else { for (let i = max + 1; i <= pos; i++) puzzleState.selected[`${row}-${i}`] = true; }
+        } else if (pos === min || pos === max) {
+            delete puzzleState.selected[key];
+        } else {
+            puzzleState.selected = { [key]: true };
+        }
+    }
+
+    renderPuzzle();
+}
+
+function submitPuzzleMove() {
+    const selectedKeys = Object.keys(puzzleState.selected);
+    if (selectedKeys.length === 0) { alert('Select at least one circle'); return; }
+
+    const row = parseInt(selectedKeys[0].split('-')[0]);
+    const positions = selectedKeys.map(k => parseInt(k.split('-')[1])).sort((a, b) => a - b);
+
+    // Validate contiguous
+    for (let i = 0; i < positions.length - 1; i++) {
+        if (positions[i + 1] !== positions[i] + 1) { alert('Circles must be contiguous'); return; }
+    }
+
+    // Apply the move to a copy and check if it's a winning move
+    const rows = JSON.parse(JSON.stringify(puzzleState.puzzles[puzzleState.currentPuzzle]));
+    for (const p of positions) rows[row][p] = 1;
+
+    const nimSum = computeNimSumFromRows(rows);
+    const correct = nimSum === 0;
+
+    if (correct) puzzleState.correct++;
+
+    // Show result
+    const stateDiv = document.getElementById('gameState');
+    stateDiv.textContent = correct
+        ? `✅ Correct! That's a winning move. (${puzzleState.correct}/${puzzleState.currentPuzzle + 1})`
+        : `❌ Not quite — that position isn't safe. (${puzzleState.correct}/${puzzleState.currentPuzzle + 1})`;
+    stateDiv.className = correct ? 'player-turn' : 'game-over';
+
+    puzzleState.selected = {};
+    puzzleState.currentPuzzle++;
+
+    if (puzzleState.currentPuzzle >= 5) {
+        // Set complete
+        const points = puzzleState.correct >= 5 ? 3 : puzzleState.correct >= 4 ? 2 : puzzleState.correct >= 3 ? 1 : 0;
+        setTimeout(() => {
+            const stateDiv2 = document.getElementById('gameState');
+            stateDiv2.className = 'game-over';
+            stateDiv2.textContent = `🧩 Set complete! ${puzzleState.correct}/5 correct → ${points} point${points !== 1 ? 's' : ''}`;
+            document.getElementById('submitBtn').disabled = true;
+            document.getElementById('replayBtn').classList.remove('hidden');
+            document.getElementById('replayBtn').onclick = startPuzzleSet;
+
+            // Update progress bar to full
+            const progressBar = document.getElementById('puzzleProgress');
+            if (progressBar) {
+                progressBar.innerHTML = `<div style="position:absolute;top:0;left:0;height:100%;width:100%;background:linear-gradient(90deg,#27ae60,#2ecc71);border-radius:8px;"></div><div style="position:absolute;top:0;left:0;width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:bold;color:white;">Complete!</div>`;
+            }
+
+            // Record score
+            if (points > 0) {
+                recordPuzzleScore(currentUser.username, points);
+            }
+
+            // Puzzle achievements
+            if (puzzleState.correct === 5) {
+                unlockAchievement('perfect_puzzle');
+                const elapsed = (Date.now() - puzzleState.startTime) / 1000;
+                if (elapsed <= 20) {
+                    unlockAchievement('stopwatch_puzzle');
+                }
+            }
+            // Track sets completed for connoisseur
+            const setsKey = 'circleGamePuzzleSets_' + currentUser.username;
+            const totalSets = (parseInt(localStorage.getItem(setsKey) || '0')) + 1;
+            localStorage.setItem(setsKey, String(totalSets));
+            if (totalSets >= 10) unlockAchievement('puzzle_connoisseur');
+
+            puzzleState.active = false;
+        }, 1500);
+    } else {
+        // Next puzzle after a short delay
+        setTimeout(() => renderPuzzle(), 1500);
+    }
+}
+
+async function recordPuzzleScore(name, points) {
+    try {
+        await fetch('/scoreboard/puzzle', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, points })
+        });
+    } catch (e) {
+        console.error('Failed to record puzzle score:', e);
+    }
+}
+
+function exitPuzzleMode() {
+    puzzleState.active = false;
+    const xorInfo = document.getElementById('puzzleXorInfo');
+    if (xorInfo) xorInfo.remove();
+    const progressBar = document.getElementById('puzzleProgress');
+    if (progressBar) progressBar.remove();
+    document.getElementById('submitBtn').onclick = submitMove;
+    document.getElementById('mainMenuBtn').onclick = returnToMainMenu;
+    returnToMainMenu();
 }
 
 // ============ ADMIN PANEL ============

@@ -71,6 +71,24 @@
       "name": "Golden",
       "description": "For the truly dedicated. 50+ wins.",
       "background": "linear-gradient(135deg, #f7971e 0%, #ffd200 50%, #f7971e 100%)"
+    },
+    {
+      "code": "champion",
+      "name": "Champion",
+      "description": "#1 on a leaderboard. Red to black.",
+      "background": "linear-gradient(135deg, #e74c3c 0%, #1a1a1a 100%)"
+    },
+    {
+      "code": "silver",
+      "name": "Silver",
+      "description": "#2 on a leaderboard. Light blue to black.",
+      "background": "linear-gradient(135deg, #74b9ff 0%, #1a1a1a 100%)"
+    },
+    {
+      "code": "bronze",
+      "name": "Bronze",
+      "description": "#3 on a leaderboard. Light brown to black.",
+      "background": "linear-gradient(135deg, #d4a574 0%, #1a1a1a 100%)"
     }
   ]
 }
