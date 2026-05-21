@@ -3312,7 +3312,7 @@ const ACHIEVEMENT_DEFS = [
 ];
 
 const HARD_ACHIEVEMENT_DEFS = [
-    { id: 'hard_speed_demon', name: 'Speed Demon', desc: 'Beat Hard AI with only 4 total seconds of thinking time (timer must be on)' },
+    { id: 'hard_speed_demon', name: 'Speed Demon', desc: 'Beat Hard AI with only 3 total seconds of thinking time (timer must be on)' },
     { id: 'hard_insanity', name: 'Insanity', desc: 'Beat Hard AI on Gigantic with every game mode active' },
     { id: 'hard_mirror', name: 'Mirror Mirror on the 7th Wall...', desc: 'Beat the Hard AI on Mirror Mode' }
 ];
