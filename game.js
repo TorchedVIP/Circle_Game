@@ -264,6 +264,7 @@ let gameState = {
     timerInterval: null,
     timerRemaining: 0,
     timerUsedTotal: 0, // cumulative seconds used across all turns this game
+    turnStartTime: 0,  // Date.now() when the current turn timer started
     // Secret mirror mode — every player move is mirrored by the computer on the opposite side
     mirrorMode: false,
     // Track initial holes in the map (positions that start removed and render as empty space)
@@ -297,6 +298,7 @@ function startTurnTimer() {
     if (gameMode !== 'single') return; // timer only in single-player for now
 
     gameState.timerRemaining = gameState.timerSeconds;
+    gameState.turnStartTime = Date.now();
     updateTimerDisplay();
 
     gameState.timerInterval = setInterval(() => {
@@ -339,17 +341,17 @@ function updateTotalTimerDisplay() {
         el.classList.add('hidden');
         return;
     }
-    // Show cumulative time used so far (plus current turn's elapsed time)
+    // Show cumulative time used so far (plus current turn's precise elapsed)
     let currentTurnUsed = 0;
-    if (gameState.isPlayerTurn && gameState.timerRemaining > 0 && !gameState.gameOver) {
-        currentTurnUsed = gameState.timerSeconds - gameState.timerRemaining;
+    if (gameState.isPlayerTurn && gameState.turnStartTime > 0 && !gameState.gameOver) {
+        currentTurnUsed = (Date.now() - gameState.turnStartTime) / 1000;
     }
     const total = gameState.timerUsedTotal + currentTurnUsed;
     el.classList.remove('hidden');
     const color = total <= 3 ? '#27ae60' : '#e74c3c';
     el.style.borderColor = color;
     el.style.color = color;
-    el.textContent = `⏳ Total: ${total}s used`;
+    el.textContent = `⏳ Total: ${total.toFixed(1)}s`;
 }
 
 function autoMoveForPlayer() {
@@ -566,6 +568,9 @@ function playAgain() {
     document.getElementById('mainMenuBtn').onclick = returnToMainMenu;
     const progressBar = document.getElementById('puzzleProgress');
     if (progressBar) progressBar.remove();
+    const puzzleTimer = document.getElementById('puzzleTimerDisplay');
+    if (puzzleTimer) puzzleTimer.remove();
+    if (puzzleState._timerInterval) clearInterval(puzzleState._timerInterval);
 
     if (gameMode === 'single') {
         initGame();
@@ -929,9 +934,11 @@ function submitMove() {
     if (gameState.gameOver || !gameState.isPlayerTurn) return;
     if (gameState.pendingCascade) return;
 
-    // Track time used this turn before clearing timer
-    if (gameState.timerSeconds > 0 && gameState.timerRemaining > 0) {
-        gameState.timerUsedTotal += (gameState.timerSeconds - gameState.timerRemaining);
+    // Track time used this turn before clearing timer (precise to 0.1s)
+    if (gameState.timerSeconds > 0 && gameState.turnStartTime > 0) {
+        const turnElapsed = (Date.now() - gameState.turnStartTime) / 1000;
+        gameState.timerUsedTotal += turnElapsed;
+        gameState.turnStartTime = 0;
     }
     clearTurnTimer();
 
@@ -2578,6 +2585,13 @@ const TUTORIALS = {
                 successMsg: 'Partial takes work! ✅'
             },
             {
+                title: 'Quick selection tip',
+                desc: 'You don\'t have to click every circle individually. Click the <strong>first</strong> circle, then click the <strong>last</strong> one — everything in between fills in automatically! Try selecting circles 1 and 4 (the ends) to grab all 4.',
+                map: { 1: [0, 0, 0, 0] },
+                validate: (rows, r, pos) => r === 1 && pos.length === 4,
+                successMsg: 'Range selection makes it fast! ✅'
+            },
+            {
                 title: 'The losing rule',
                 desc: 'The player who takes the <strong>last circle loses</strong>. Leave exactly 1 circle remaining — take 2 from this row of 3.',
                 map: { 1: [0, 0, 0] },
@@ -2764,23 +2778,41 @@ const TUTORIALS = {
         steps: [
             {
                 title: 'The winning secret',
-                desc: 'This game has a mathematical pattern behind it. The key is <strong>XOR</strong> (exclusive or) — a binary operation. If you can make the XOR of all row sizes equal <strong>0</strong> after your move, you\'re in a winning position.',
+                desc: 'This game has a mathematical trick. It uses <strong>XOR</strong> — a way to combine numbers. If you can make the XOR of all row sizes equal <strong>0</strong> after your move, you\'re in a winning position.<br><br>Don\'t worry — we\'ll teach you step by step with real numbers.',
             },
             {
-                title: 'What is XOR?',
-                desc: 'XOR compares numbers in binary, bit by bit. If the bits are <strong>different</strong>, the result is 1. If they\'re the <strong>same</strong>, the result is 0.<br><br>Example: 3 XOR 5 → 011 XOR 101 = 110 = 6<br>Example: 3 XOR 3 → 011 XOR 011 = 000 = 0',
+                title: 'XOR with small numbers',
+                desc: 'XOR works like this: same numbers cancel out to 0, different numbers give something else.<br><br><strong>Try it:</strong> What is 3 XOR 3?',
+                xorQuiz: { a: 3, b: 3, answer: 0 }
             },
             {
-                title: 'How to use it',
-                desc: 'Count the circles remaining in each row (only contiguous groups matter — holes split a row into segments). XOR all the segment sizes together.<br><br>If the result is <strong>0</strong>, the position is <strong>bad for you</strong> (whoever just moved put you here).<br>If it\'s <strong>not 0</strong>, there\'s always a move that makes it 0 — find it!',
+                title: 'XOR with different numbers',
+                desc: 'When numbers are different, XOR gives a non-zero result.<br><br><strong>Try it:</strong> What is 1 XOR 2?',
+                xorQuiz: { a: 1, b: 2, answer: 3 }
             },
             {
-                title: 'Example: Classic map',
-                desc: 'Classic starts with rows of 1, 2, 3, 4, 5.<br>XOR: 1 ⊕ 2 ⊕ 3 ⊕ 4 ⊕ 5 = 1<br>Since it\'s not 0, the first player can win! Try taking 1 from row 5 (leaving 4): 1 ⊕ 2 ⊕ 3 ⊕ 4 ⊕ 4 = 0 ✓',
+                title: 'XOR chains',
+                desc: 'You can XOR multiple numbers in a row. Do them one at a time, left to right.<br><br><strong>Try it:</strong> What is 1 XOR 2 XOR 3?<br><span style="font-size:12px;color:#888;">(Hint: 1 XOR 2 = 3, then 3 XOR 3 = ?)</span>',
+                xorQuiz: { a: null, b: null, answer: 0, label: '1 ⊕ 2 ⊕ 3' }
+            },
+            {
+                title: 'The Classic map',
+                desc: 'Classic has rows of 1, 2, 3, 4, 5. XOR them all:<br>1 ⊕ 2 = 3, then 3 ⊕ 3 = 0, then 0 ⊕ 4 = 4, then 4 ⊕ 5 = ?<br><br><strong>What\'s the final XOR?</strong>',
+                xorQuiz: { a: null, b: null, answer: 1, label: '1 ⊕ 2 ⊕ 3 ⊕ 4 ⊕ 5' }
+            },
+            {
+                title: 'Using it to win',
+                desc: 'Since Classic\'s XOR is 1 (not 0), the first player can win! Take 1 circle from row 5 (leaving 4):<br>1 ⊕ 2 ⊕ 3 ⊕ 4 ⊕ 4 = ?<br><br><strong>What\'s the XOR now?</strong>',
+                xorQuiz: { a: null, b: null, answer: 0, label: '1 ⊕ 2 ⊕ 3 ⊕ 4 ⊕ 4' }
+            },
+            {
+                title: 'Free calculator',
+                desc: 'Use this to practice XOR on any numbers. Type two numbers and see the result. When you\'re comfortable, try the puzzles!',
+                xorCalculator: true
             },
             {
                 title: 'The endgame twist',
-                desc: 'This is <strong>Misère Nim</strong> — the last circle loses. The XOR strategy works until only single circles remain. Then count the singles: if there\'s an <strong>odd</strong> number, you want to leave it odd (force opponent to take the last). Adjust your final moves accordingly.',
+                desc: 'This is <strong>Misère Nim</strong> — the last circle loses. XOR strategy works until only single circles remain. Then count the singles: <strong>odd</strong> number of singles = you\'re winning (opponent takes the last). Adjust your final moves to keep it odd.',
             },
             {
                 title: 'Practice with puzzles',
@@ -2990,6 +3022,70 @@ function renderTutorialStep() {
         startTutorialMiniGame(step, area);
     } else if (step.map === null && step.validate === null && currentTutorialId === 'basics' && tutorialStep === tut.steps.length - 1) {
         startTutorialFullGame(area);
+    } else if (step.xorQuiz) {
+        // Interactive XOR quiz
+        const quiz = step.xorQuiz;
+        const inputDiv = document.createElement('div');
+        inputDiv.style.cssText = 'display:flex; gap:10px; align-items:center; justify-content:center; margin-top:10px;';
+        if (quiz.label) {
+            const label = document.createElement('span');
+            label.style.cssText = 'font-weight:bold; font-size:16px; color:#333;';
+            label.textContent = quiz.label + ' = ';
+            inputDiv.appendChild(label);
+        } else {
+            const label = document.createElement('span');
+            label.style.cssText = 'font-weight:bold; font-size:16px; color:#333;';
+            label.textContent = `${quiz.a} ⊕ ${quiz.b} = `;
+            inputDiv.appendChild(label);
+        }
+        const input = document.createElement('input');
+        input.type = 'number';
+        input.style.cssText = 'width:60px; padding:8px; font-size:16px; text-align:center; border:2px solid #ddd; border-radius:8px;';
+        input.min = '0';
+        inputDiv.appendChild(input);
+        const checkBtn = document.createElement('button');
+        checkBtn.textContent = 'Check';
+        checkBtn.style.cssText = 'background:#667eea; color:white; padding:8px 16px; font-size:14px; border:none; border-radius:8px; cursor:pointer;';
+        checkBtn.onclick = () => {
+            const val = parseInt(input.value);
+            if (isNaN(val)) return;
+            if (val === quiz.answer) {
+                document.getElementById('tutorialMsg').textContent = '✅ Correct!';
+                document.getElementById('tutorialMsg').style.color = '#27ae60';
+                checkBtn.disabled = true;
+                input.disabled = true;
+                setTimeout(() => advanceTutorial(), 1000);
+            } else {
+                document.getElementById('tutorialMsg').textContent = '❌ Not quite, try again.';
+                document.getElementById('tutorialMsg').style.color = '#e74c3c';
+                input.value = '';
+                input.focus();
+            }
+        };
+        input.addEventListener('keydown', (e) => { if (e.key === 'Enter') checkBtn.click(); });
+        inputDiv.appendChild(checkBtn);
+        area.appendChild(inputDiv);
+    } else if (step.xorCalculator) {
+        // Free XOR calculator
+        const calcDiv = document.createElement('div');
+        calcDiv.style.cssText = 'padding:16px; background:#f8f9ff; border:2px solid #667eea; border-radius:10px; text-align:center;';
+        calcDiv.innerHTML = `
+            <div style="display:flex; gap:8px; align-items:center; justify-content:center; margin-bottom:12px;">
+                <input type="number" id="xorCalcA" style="width:60px; padding:8px; font-size:16px; text-align:center; border:2px solid #ddd; border-radius:8px;" placeholder="A" min="0">
+                <span style="font-weight:bold; font-size:18px;">⊕</span>
+                <input type="number" id="xorCalcB" style="width:60px; padding:8px; font-size:16px; text-align:center; border:2px solid #ddd; border-radius:8px;" placeholder="B" min="0">
+                <span style="font-weight:bold; font-size:18px;">=</span>
+                <span id="xorCalcResult" style="font-weight:bold; font-size:18px; color:#667eea; min-width:30px;">?</span>
+            </div>
+            <button onclick="document.getElementById('xorCalcResult').textContent = (parseInt(document.getElementById('xorCalcA').value)||0) ^ (parseInt(document.getElementById('xorCalcB').value)||0)" style="background:#667eea; color:white; padding:8px 16px; border:none; border-radius:8px; cursor:pointer; font-size:14px;">Calculate</button>
+        `;
+        area.appendChild(calcDiv);
+        // Got it button to advance
+        const btn = document.createElement('button');
+        btn.textContent = 'Got it →';
+        btn.style.cssText = 'background:#667eea; color:white; display:block; margin:14px auto 0; padding:12px 24px;';
+        btn.onclick = () => advanceTutorial();
+        area.appendChild(btn);
     } else {
         const btn = document.createElement('button');
         btn.textContent = 'Got it →';
@@ -3373,7 +3469,8 @@ const ACHIEVEMENT_DEFS = [
 const HARD_ACHIEVEMENT_DEFS = [
     { id: 'hard_speed_demon', name: 'Speed Demon', desc: 'Beat Hard AI with only 3 total seconds of thinking time (timer must be on)' },
     { id: 'hard_insanity', name: 'Insanity', desc: 'Beat Hard AI on Gigantic with every game mode active' },
-    { id: 'hard_mirror', name: 'Mirror Mirror on the 7th Wall...', desc: 'Beat the Hard AI on Mirror Mode' }
+    { id: 'hard_mirror', name: 'Mirror Mirror on the 7th Wall...', desc: '???' },
+    { id: 'hard_crazy_man', name: 'Crazy Man', desc: 'Complete a puzzle set perfectly in under 10 seconds' },
 ];
 
 let unlockedAchievements = new Set();
@@ -4010,6 +4107,28 @@ function renderPuzzle() {
     const pct = ((puzzleState.currentPuzzle) / 5) * 100;
     progressBar.innerHTML = `<div style="position:absolute;top:0;left:0;height:100%;width:${pct}%;background:linear-gradient(90deg,#667eea,#764ba2);border-radius:8px;transition:width 0.3s;"></div><div style="position:absolute;top:0;left:0;width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:bold;color:#333;">${puzzleState.currentPuzzle + 1} / 5</div>`;
 
+    // Puzzle timer (shows elapsed time with 1 decimal)
+    if (hardModeEnabled) {
+        let puzzleTimer = document.getElementById('puzzleTimerDisplay');
+        if (!puzzleTimer) {
+            puzzleTimer = document.createElement('div');
+            puzzleTimer.id = 'puzzleTimerDisplay';
+            puzzleTimer.style.cssText = 'margin-bottom:12px; padding:8px; background:#f5f5f5; border:2px solid #999; border-radius:8px; font-size:14px; font-weight:bold; text-align:center; color:#555;';
+            progressBar.parentNode.insertBefore(puzzleTimer, progressBar.nextSibling);
+        }
+        // Clear old interval
+        if (puzzleState._timerInterval) clearInterval(puzzleState._timerInterval);
+        puzzleState._timerInterval = setInterval(() => {
+            const el = document.getElementById('puzzleTimerDisplay');
+            if (!el || !puzzleState.active) { clearInterval(puzzleState._timerInterval); return; }
+            const elapsed = (Date.now() - puzzleState.startTime) / 1000;
+            const color = elapsed <= 10 ? '#27ae60' : '#e74c3c';
+            el.style.color = color;
+            el.style.borderColor = color;
+            el.textContent = `⏳ ${elapsed.toFixed(1)}s`;
+        }, 100);
+    }
+
     const rowNums = Object.keys(rows).map(Number).sort((a, b) => a - b);
     for (const rowNum of rowNums) {
         const rowDiv = document.createElement('div');
@@ -4223,6 +4342,9 @@ function submitPuzzleMove() {
                 if (elapsed <= 20) {
                     unlockAchievement('stopwatch_puzzle');
                 }
+                if (hardModeEnabled && elapsed <= 10) {
+                    unlockAchievement('hard_crazy_man');
+                }
             }
             // Track sets completed for connoisseur
             const setsKey = 'circleGamePuzzleSets_' + currentUser.username;
@@ -4252,10 +4374,13 @@ async function recordPuzzleScore(name, points) {
 
 function exitPuzzleMode() {
     puzzleState.active = false;
+    if (puzzleState._timerInterval) clearInterval(puzzleState._timerInterval);
     const xorInfo = document.getElementById('puzzleXorInfo');
     if (xorInfo) xorInfo.remove();
     const progressBar = document.getElementById('puzzleProgress');
     if (progressBar) progressBar.remove();
+    const puzzleTimer = document.getElementById('puzzleTimerDisplay');
+    if (puzzleTimer) puzzleTimer.remove();
     document.getElementById('submitBtn').onclick = submitMove;
     document.getElementById('mainMenuBtn').onclick = returnToMainMenu;
     returnToMainMenu();
