@@ -272,6 +272,62 @@ async def get_scoreboard(request):
     return web.json_response(safe)
 
 
+# ── Custom Theme Endpoints ──────────────────────────────────────────────────
+
+async def save_custom_theme(request):
+    """POST /themes/custom — body {name, code, background, creatorName}
+    Saves a user-created theme. Non-VIP users can only have one at a time."""
+    try:
+        data = await request.json()
+    except Exception:
+        return web.json_response({'error': 'Invalid JSON'}, status=400)
+
+    creator = str(data.get('creatorName', '')).strip()[:15].lower()
+    code = str(data.get('code', '')).strip()[:15].lower()
+    name = str(data.get('name', '')).strip()[:20]
+    background = str(data.get('background', '')).strip()[:200]
+
+    if not creator or not code or not name or not background:
+        return web.json_response({'error': 'All fields required'}, status=400)
+
+    # Validate code doesn't conflict with built-in themes
+    themes_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'themes.json')
+    with open(themes_file, 'r') as f:
+        themes_data = json.load(f)
+    built_in_codes = [t['code'].lower() for t in themes_data.get('themes', [])]
+    if code in built_in_codes:
+        return web.json_response({'error': 'Code conflicts with a built-in theme'}, status=400)
+
+    board = load_scoreboard()
+    if 'customThemes' not in board:
+        board['customThemes'] = []
+
+    is_vip = (creator == 'vip')
+
+    # Non-VIP: remove their existing custom theme first (only one at a time)
+    if not is_vip:
+        board['customThemes'] = [t for t in board['customThemes'] if t.get('creator', '').lower() != creator]
+
+    # Remove any existing theme with the same code
+    board['customThemes'] = [t for t in board['customThemes'] if t['code'].lower() != code]
+
+    board['customThemes'].append({
+        'code': code,
+        'name': name,
+        'description': f'Created by {creator}',
+        'background': background,
+        'creator': creator
+    })
+    save_scoreboard(board)
+    return web.json_response({'ok': True})
+
+
+async def get_custom_themes(request):
+    """GET /themes/custom — returns all user-created themes"""
+    board = load_scoreboard()
+    return web.json_response({'themes': board.get('customThemes', [])})
+
+
 # ── Admin Endpoints ────────────────────────────────────────────────────────
 
 async def admin_reset_password(request):
@@ -678,6 +734,8 @@ app.router.add_post('/achievements/unlock', unlock_achievement)
 app.router.add_post('/admin/reset-password', admin_reset_password)
 app.router.add_post('/admin/delete-password', admin_delete_password)
 app.router.add_post('/admin/delete-user', admin_delete_user)
+app.router.add_post('/themes/custom', save_custom_theme)
+app.router.add_get('/themes/custom', get_custom_themes)
 app.router.add_get('/themes', lambda r: web.FileResponse(
     os.path.join(os.path.dirname(os.path.abspath(__file__)), 'themes.json'),
     headers=NO_CACHE_HEADERS))

@@ -2408,6 +2408,14 @@ async function refreshUnlocks() {
             else puzzleBtn.classList.add('hidden');
         }
 
+        // Theme creator unlock (50+ wins or VIP)
+        const createThemeBtn = document.getElementById('createThemeBtn');
+        if (createThemeBtn) {
+            const isVip = currentUser && currentUser.username.toLowerCase() === 'vip';
+            if (wins >= 50 || isVip) createThemeBtn.classList.remove('hidden');
+            else createThemeBtn.classList.add('hidden');
+        }
+
         // Re-check tutorial blink now that playerLevel is set
         startTutorialBlink();
 
@@ -3450,7 +3458,12 @@ const ACHIEVEMENT_DEFS = [
     { id: 'perfect_puzzle',  name: 'Perfect',                desc: 'Get 5/5 on a puzzle set' },
     { id: 'stopwatch_puzzle',name: 'Stopwatch',              desc: 'Finish a puzzle set perfectly in under 20 seconds' },
     { id: 'puzzle_connoisseur', name: 'Puzzle Connoisseur',  desc: 'Complete 10 puzzle sets' },
-    { id: 'golden',          name: 'Golden',                 desc: '50+ total wins', hidden: true },
+    { id: 'golden',          name: 'Golden',                 desc: '50+ total wins — unlock theme creator (solid colour)', hidden: true },
+    { id: 'artisan',         name: 'Artisan',                desc: '75+ total wins — unlock repeating-linear themes', hidden: true },
+    { id: 'architect',       name: 'Architect',              desc: '100+ total wins — unlock linear-gradient themes', hidden: true },
+    { id: 'hypnotist',       name: 'Hypnotist',              desc: '125+ total wins — unlock repeating-radial themes', hidden: true },
+    { id: 'kaleidoscope',    name: 'Kaleidoscope',           desc: '150+ total wins — unlock conic-gradient themes', hidden: true },
+    { id: 'mastermind',      name: 'Mastermind',             desc: '200+ total wins — unlock radial-gradient themes', hidden: true },
     { id: 'secret_skin',     name: '???',                    desc: 'A secret achievement...', hidden: true },
 ];
 
@@ -3557,6 +3570,11 @@ async function checkWinAchievements(name) {
         if (totalWins >= 15) unlockAchievement('slippery');
         if (totalWins >= 20) unlockAchievement('demoman');
         if (totalWins >= 50) { unlockAchievement('golden'); saveUnlockedTheme('golden'); }
+        if (totalWins >= 75) unlockAchievement('artisan');
+        if (totalWins >= 100) unlockAchievement('architect');
+        if (totalWins >= 125) unlockAchievement('hypnotist');
+        if (totalWins >= 150) unlockAchievement('kaleidoscope');
+        if (totalWins >= 200) unlockAchievement('mastermind');
 
         const medE  = (board.singlePlayer.medium || []).find(e => e.name.toLowerCase() === name.toLowerCase());
         const hardE = (board.singlePlayer.hard   || []).find(e => e.name.toLowerCase() === name.toLowerCase());
@@ -3738,10 +3756,8 @@ function renderAchievements(unlockedSet, container) {
     // Track secret clicks
     let secretClicks = new Set();
 
-    ACHIEVEMENT_DEFS.forEach(def => {
-        // Hidden achievements only show if unlocked
-        if (def.hidden && !unlockedSet.has(def.id)) return;
-
+    // Render normal (non-hidden) achievements first
+    ACHIEVEMENT_DEFS.filter(d => !d.hidden).forEach(def => {
         const unlocked = unlockedSet.has(def.id);
         const card = document.createElement('div');
         card.style.cssText = `
@@ -3750,7 +3766,6 @@ function renderAchievements(unlockedSet, container) {
             display:flex; align-items:center; gap:10px; cursor:default;
         `;
 
-        // Circle icon — styled like the game circles
         const circleIcon = document.createElement('div');
         circleIcon.style.cssText = `
             width:36px; height:36px; border-radius:50%; flex-shrink:0;
@@ -3770,7 +3785,6 @@ function renderAchievements(unlockedSet, container) {
                 secretClicks.add(def.id);
                 circleIcon.style.background = '#764ba2';
                 circleIcon.style.borderColor = '#764ba2';
-                // Check if all 3 secret ones are clicked
                 if (secretClicks.has('oops') && secretClicks.has('cheater') && secretClicks.has('dedicated')) {
                     unlockAchievement('secret_skin');
                     saveUnlockedTheme('secret');
@@ -3790,6 +3804,34 @@ function renderAchievements(unlockedSet, container) {
         grid.appendChild(card);
     });
     container.appendChild(grid);
+
+    // Hidden achievements section — only show if at least one is unlocked
+    const hiddenDefs = ACHIEVEMENT_DEFS.filter(d => d.hidden);
+    const anyHiddenUnlocked = hiddenDefs.some(d => unlockedSet.has(d.id));
+    if (anyHiddenUnlocked) {
+        const hiddenTitle = document.createElement('h3');
+        hiddenTitle.style.cssText = 'color:#764ba2; font-size:14px; margin:18px 0 10px; text-transform:uppercase; letter-spacing:1px;';
+        hiddenTitle.textContent = '🔮 Hidden';
+        container.appendChild(hiddenTitle);
+
+        const hiddenGrid = document.createElement('div');
+        hiddenGrid.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:10px;';
+
+        hiddenDefs.forEach(def => {
+            if (!unlockedSet.has(def.id)) return;
+            const card = document.createElement('div');
+            card.style.cssText = 'padding:10px 12px; border-radius:10px; border:2px solid #764ba2; background:#f3e8ff; display:flex; align-items:center; gap:10px;';
+            const circleIcon = document.createElement('div');
+            circleIcon.style.cssText = 'width:36px; height:36px; border-radius:50%; flex-shrink:0; border:3px solid #764ba2; background:#764ba2; display:flex; align-items:center; justify-content:center;';
+            circleIcon.innerHTML = '<span style="color:white;font-size:14px;font-weight:bold;">✓</span>';
+            const textDiv = document.createElement('div');
+            textDiv.innerHTML = `<div style="font-weight:bold;font-size:13px;color:#333;">${def.name}</div><div style="font-size:11px;color:#777;margin-top:2px">${def.desc}</div>`;
+            card.appendChild(circleIcon);
+            card.appendChild(textDiv);
+            hiddenGrid.appendChild(card);
+        });
+        container.appendChild(hiddenGrid);
+    }
 
     // Hard mode achievements section
     // Check if all normal (non-hidden) achievements are unlocked, excluding VIP/L0n3W01f-dependent ones
@@ -3889,6 +3931,16 @@ async function loadThemes() {
         const res = await fetch('/themes');
         const data = await res.json();
         loadedThemes = data.themes || [];
+        // Also load custom themes
+        const customRes = await fetch('/themes/custom');
+        const customData = await customRes.json();
+        const customThemes = customData.themes || [];
+        // Merge custom themes (avoid duplicates by code)
+        for (const ct of customThemes) {
+            if (!loadedThemes.find(t => t.code.toLowerCase() === ct.code.toLowerCase())) {
+                loadedThemes.push(ct);
+            }
+        }
     } catch (e) {
         console.error('Failed to load themes:', e);
     }
@@ -4389,6 +4441,117 @@ function exitPuzzleMode() {
     document.getElementById('submitBtn').onclick = submitMove;
     document.getElementById('mainMenuBtn').onclick = returnToMainMenu;
     returnToMainMenu();
+}
+
+// ============ THEME CREATOR ============
+const THEME_TIERS = [
+    { wins: 50,  type: 'solid',                    label: 'Solid colour (e.g. #ff6600)' },
+    { wins: 75,  type: 'repeating-linear-gradient', label: 'Repeating linear gradient' },
+    { wins: 100, type: 'linear-gradient',           label: 'Linear gradient' },
+    { wins: 125, type: 'repeating-radial-gradient', label: 'Repeating radial gradient' },
+    { wins: 150, type: 'conic-gradient',            label: 'Conic gradient' },
+    { wins: 200, type: 'radial-gradient',           label: 'Radial gradient' },
+];
+
+function getUnlockedThemeTier() {
+    if (currentUser && currentUser.username.toLowerCase() === 'vip') return THEME_TIERS.length; // all tiers
+    const wins = gameState.playerLevel || 0;
+    let tier = 0;
+    for (const t of THEME_TIERS) {
+        if (wins >= t.wins) tier++;
+        else break;
+    }
+    return tier;
+}
+
+function getAllowedThemeTypes() {
+    const tier = getUnlockedThemeTier();
+    return THEME_TIERS.slice(0, tier).map(t => t.type);
+}
+
+function openThemeCreator() {
+    const tier = getUnlockedThemeTier();
+    if (tier === 0) { alert('You need 50+ wins to create themes.'); return; }
+
+    const allowed = THEME_TIERS.slice(0, tier);
+    const isVip = currentUser && currentUser.username.toLowerCase() === 'vip';
+    const info = isVip
+        ? 'VIP: All theme types available. Create as many as you want.'
+        : `You can create 1 custom theme. Allowed types: ${allowed.map(t => t.label).join(', ')}`;
+
+    document.getElementById('themeCreatorInfo').textContent = info;
+    document.getElementById('themeTypeHint').textContent = 'Allowed: ' + allowed.map(t => t.type).join(', ');
+    document.getElementById('customThemeName').value = '';
+    document.getElementById('customThemeCode').value = '';
+    document.getElementById('customThemeBg').value = '';
+    document.getElementById('themePreviewBox').style.background = '#f0f0f0';
+    document.getElementById('themeCreatorError').textContent = '';
+    document.getElementById('themeCreatorModal').classList.add('show');
+}
+
+function closeThemeCreator() {
+    document.getElementById('themeCreatorModal').classList.remove('show');
+}
+
+function previewCustomTheme() {
+    const bg = document.getElementById('customThemeBg').value.trim();
+    document.getElementById('themePreviewBox').style.background = bg || '#f0f0f0';
+}
+
+async function submitCustomTheme() {
+    const name = document.getElementById('customThemeName').value.trim();
+    const code = document.getElementById('customThemeCode').value.trim().toLowerCase();
+    const background = document.getElementById('customThemeBg').value.trim();
+    const errorEl = document.getElementById('themeCreatorError');
+
+    if (!name) { errorEl.textContent = 'Enter a theme name.'; return; }
+    if (!code || code.length < 2) { errorEl.textContent = 'Code must be at least 2 characters.'; return; }
+    if (!background) { errorEl.textContent = 'Enter a background CSS value.'; return; }
+
+    // Validate the background type is allowed
+    const isVip = currentUser && currentUser.username.toLowerCase() === 'vip';
+    if (!isVip) {
+        const allowed = getAllowedThemeTypes();
+        const bgLower = background.toLowerCase();
+        let typeOk = false;
+        // Check if it's a solid colour (no gradient keyword)
+        const isGradient = bgLower.includes('gradient');
+        if (!isGradient && allowed.includes('solid')) {
+            typeOk = true;
+        } else {
+            for (const type of allowed) {
+                if (type !== 'solid' && bgLower.startsWith(type)) { typeOk = true; break; }
+            }
+        }
+        if (!typeOk) {
+            errorEl.textContent = 'That background type is not unlocked yet.';
+            return;
+        }
+    }
+
+    try {
+        const res = await fetch('/themes/custom', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ creatorName: currentUser.username, code, name, background })
+        });
+        const data = await res.json();
+        if (res.ok && data.ok) {
+            errorEl.style.color = '#27ae60';
+            errorEl.textContent = `Theme "${name}" saved with code "${code}"!`;
+            // Add to loaded themes so it's immediately usable
+            loadedThemes.push({ code, name, description: `Created by ${currentUser.username}`, background });
+            saveUnlockedTheme(code);
+            applyThemeByCode(code);
+            setTimeout(() => closeThemeCreator(), 1500);
+        } else {
+            errorEl.style.color = '#e74c3c';
+            errorEl.textContent = data.error || 'Failed to save.';
+        }
+    } catch (e) {
+        errorEl.style.color = '#e74c3c';
+        errorEl.textContent = 'Connection error.';
+    }
 }
 
 // ============ ADMIN PANEL ============

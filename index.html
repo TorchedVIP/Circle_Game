@@ -1331,6 +1331,7 @@
                         <label class="sidebar-label">🎨 Theme Code</label>
                         <input type="text" id="themeCodeInput" class="sidebar-input" placeholder="Enter code" maxlength="20">
                         <button class="sidebar-btn sidebar-btn-sm" onclick="applyThemeCode()">Apply</button>
+                        <button class="sidebar-btn sidebar-btn-sm hidden" id="createThemeBtn" onclick="openThemeCreator()" style="margin-top:4px;">✨ Create Theme</button>
                         <div id="unlockedThemes" style="margin-top:8px;"></div>
                     </div>
                     <button class="sidebar-btn sidebar-btn-logout" onclick="logout()">🚪 Logout</button>
@@ -1546,6 +1547,34 @@
                 <button onclick="pwdSubmit()" style="background:linear-gradient(135deg,#667eea,#764ba2); color:white; padding:10px 20px; font-size:14px;">Confirm</button>
                 <button onclick="pwdCancel()" style="background:#eee; color:#666; padding:10px 16px; font-size:14px;">Cancel</button>
             </div>
+        </div>
+    </div>
+
+    <!-- Theme Creator Modal -->
+    <div id="themeCreatorModal" class="modal">
+        <div class="modal-content" style="max-width:460px; text-align:left;">
+            <h2 style="text-align:center;">🎨 Create a Theme</h2>
+            <p id="themeCreatorInfo" style="color:#666; font-size:13px; margin-bottom:14px; text-align:center;"></p>
+            <div style="margin-bottom:12px;">
+                <label style="display:block; font-size:13px; font-weight:600; color:#555; margin-bottom:4px;">Theme Name</label>
+                <input type="text" id="customThemeName" style="width:100%; padding:8px; font-size:14px; border:2px solid #ddd; border-radius:8px; box-sizing:border-box;" placeholder="My Theme" maxlength="20">
+            </div>
+            <div style="margin-bottom:12px;">
+                <label style="display:block; font-size:13px; font-weight:600; color:#555; margin-bottom:4px;">Code (others can use this to apply it)</label>
+                <input type="text" id="customThemeCode" style="width:100%; padding:8px; font-size:14px; border:2px solid #ddd; border-radius:8px; box-sizing:border-box;" placeholder="mytheme" maxlength="15">
+            </div>
+            <div style="margin-bottom:12px;">
+                <label style="display:block; font-size:13px; font-weight:600; color:#555; margin-bottom:4px;">Background CSS</label>
+                <input type="text" id="customThemeBg" style="width:100%; padding:8px; font-size:13px; border:2px solid #ddd; border-radius:8px; box-sizing:border-box; font-family:monospace;" placeholder="linear-gradient(135deg, #ff0000, #0000ff)">
+                <div style="font-size:11px; color:#888; margin-top:4px;" id="themeTypeHint"></div>
+            </div>
+            <div id="themePreviewBox" style="width:100%; height:50px; border-radius:8px; border:2px solid #ddd; margin-bottom:12px;"></div>
+            <div style="display:flex; gap:8px; justify-content:center;">
+                <button onclick="previewCustomTheme()" style="background:#f0f0f0; color:#333; padding:10px 16px; font-size:14px; border:2px solid #ddd;">Preview</button>
+                <button onclick="submitCustomTheme()" style="background:#667eea; color:white; padding:10px 18px; font-size:14px;">Save Theme</button>
+                <button onclick="closeThemeCreator()" style="background:#95a5a6; color:white; padding:10px 16px; font-size:14px;">Cancel</button>
+            </div>
+            <div id="themeCreatorError" style="color:#e74c3c; font-size:13px; min-height:18px; margin-top:10px; text-align:center;"></div>
         </div>
     </div>
 
