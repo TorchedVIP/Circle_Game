@@ -1956,7 +1956,7 @@ function showAutoFinishButton() {
 
     const btn = document.createElement('button');
     btn.id = 'autoFinishBtn';
-    btn.textContent = '⚡ Auto-finish';
+    btn.textContent = '⚡ Auto-finish [Tab]';
     btn.style.cssText = 'background:#27ae60; color:white; padding:10px 20px; font-size:14px; border-radius:8px; border:none; cursor:pointer; font-weight:bold;';
     btn.onclick = runAutoFinish;
     controls.appendChild(btn);
@@ -4496,13 +4496,18 @@ window.onload = () => {
 
     refreshUnlocks();
 
-    // Enter key submits move when game screen is visible
+    // Enter key submits move, Tab key auto-finishes when game screen is visible
     document.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' && !document.getElementById('gameScreen').classList.contains('hidden')) {
+        if (document.getElementById('gameScreen').classList.contains('hidden')) return;
+        if (e.key === 'Enter') {
             const submitBtn = document.getElementById('submitBtn');
             if (submitBtn && !submitBtn.disabled) {
                 submitBtn.click();
             }
+        } else if (e.key === 'Tab') {
+            e.preventDefault();
+            const autoBtn = document.getElementById('autoFinishBtn');
+            if (autoBtn) autoBtn.click();
         }
     });
 };
