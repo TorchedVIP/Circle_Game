@@ -316,6 +316,7 @@ function clearTurnTimer() {
         clearInterval(gameState.timerInterval);
         gameState.timerInterval = null;
     }
+    gameState.turnStartTime = 0;
     const el = document.getElementById('timerDisplay');
     if (el) el.classList.add('hidden');
 }
