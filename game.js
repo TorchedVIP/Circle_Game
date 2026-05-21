@@ -3522,6 +3522,11 @@ async function unlockAchievement(id) {
     if (id === 'wolf_slayer') saveUnlockedTheme('wolf');
     if (id === 'golden') saveUnlockedTheme('golden');
     if (id === 'secret_skin') saveUnlockedTheme('secret');
+    // Hard mode achievement themes
+    if (id === 'hard_speed_demon') saveUnlockedTheme('vortex');
+    if (id === 'hard_insanity') saveUnlockedTheme('hazard');
+    if (id === 'hard_mirror') saveUnlockedTheme('abyss');
+    if (id === 'hard_crazy_man') saveUnlockedTheme('hypnotic');
     renderUnlockedThemes();
 }
 

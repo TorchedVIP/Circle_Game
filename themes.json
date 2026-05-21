@@ -89,6 +89,30 @@
       "name": "Bronze",
       "description": "#3 on a leaderboard. Light brown to black.",
       "background": "linear-gradient(135deg, #d4a574 0%, #1a1a1a 100%)"
+    },
+    {
+      "code": "vortex",
+      "name": "Vortex",
+      "description": "A swirling colour wheel. Speed Demon reward.",
+      "background": "conic-gradient(from 180deg, #e74c3c, #f39c12, #f1c40f, #27ae60, #3498db, #9b59b6, #e74c3c)"
+    },
+    {
+      "code": "hazard",
+      "name": "Hazard",
+      "description": "Danger stripes. Insanity reward.",
+      "background": "repeating-linear-gradient(45deg, #1a1a1a 0px, #1a1a1a 20px, #e74c3c 20px, #e74c3c 40px)"
+    },
+    {
+      "code": "abyss",
+      "name": "Abyss",
+      "description": "Stare into the void. Mirror Mirror reward.",
+      "background": "radial-gradient(circle at 50% 50%, #0f0c29 0%, #302b63 50%, #000000 100%)"
+    },
+    {
+      "code": "hypnotic",
+      "name": "Hypnotic",
+      "description": "Concentric madness. Crazy Man reward.",
+      "background": "repeating-radial-gradient(circle at 50% 50%, #1a1a2e 0px, #1a1a2e 20px, #e94560 20px, #e94560 22px, #1a1a2e 22px, #1a1a2e 42px)"
     }
   ]
 }
