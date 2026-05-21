@@ -1,13 +1,13 @@
 # Circle Game
 
 A Misère-Nim strategy game where the player who takes the **last circle loses**. Learn the patterns, master the modes, and climb the leaderboard.
----
+
 ## How to Play
 
 - Select one or more **contiguous circles** from a single row
 - Click **Submit Move** (or press Enter)
 - The player forced to take the last circle **loses**
----
+
 ## Features
 
 - **3 AI difficulties** — Easy, Medium, Hard
@@ -21,7 +21,7 @@ A Misère-Nim strategy game where the player who takes the **last circle loses**
 - **Leaderboard themes** — Hold #1, #2, or #3 on any board to unlock exclusive colour schemes
 - **Theme codes** — Customise your background with unlockable colour themes
 - **Tutorial** — Interactive lessons for every game mode
----
+
 ## Running the Server
 
 Visit **circle-game.win** to play online! You can host this locally through UV as well.
@@ -41,7 +41,7 @@ Then visit it on your local network at:
 http://localhost:5000
 
 You cannot play with anyone outside of your local network this way.
----
+
 ## Project Structure
 
 ```
@@ -54,17 +54,10 @@ You cannot play with anyone outside of your local network this way.
 ├── scoreboard.template.json # Clean scoreboard template
 └── pyproject.toml          # Python project config
 ```
----
+
 ## Secret Codes
+Theme codes ask VIP for colour codes, or earn them through achievements
 
-Enter these in the Theme Code input on the sidebar:
-
-| Code | Effect |
-|------|--------|
-| `82662` | Unlock all game modes |
-| `ultranightmare` | Force-enable hard mode achievements |
-| Theme codes | Ask VIP for colour codes, or earn them through achievements |
----
 ## Credits
 
 - **Game Design** — VIP
