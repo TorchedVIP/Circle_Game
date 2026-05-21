@@ -571,7 +571,7 @@ function playAgain() {
     if (progressBar) progressBar.remove();
     const puzzleTimer = document.getElementById('puzzleTimerDisplay');
     if (puzzleTimer) puzzleTimer.remove();
-    if (puzzleState._timerInterval) clearInterval(puzzleState._timerInterval);
+    if (puzzleState._timerInterval) { clearInterval(puzzleState._timerInterval); puzzleState._timerInterval = null; }
 
     if (gameMode === 'single') {
         initGame();
@@ -2778,46 +2778,33 @@ const TUTORIALS = {
         unlockWins: 5,
         steps: [
             {
-                title: 'The winning secret',
-                desc: 'This game has a mathematical trick. It uses <strong>XOR</strong> — a way to combine numbers. If you can make the XOR of all row sizes equal <strong>0</strong> after your move, you\'re in a winning position.<br><br>Don\'t worry — we\'ll teach you step by step with real numbers.',
+                title: 'The 2×2 pattern',
+                desc: 'The simplest winning pattern: <strong>two rows with the same number of circles</strong>. If your opponent takes from one row, you mirror them on the other. They\'re always forced to take the last circle!<br><br>Example: Row A has 2, Row B has 2. Opponent takes 1 from A → you take 1 from B. Now it\'s 1 and 1 — they\'re stuck.',
             },
             {
-                title: 'XOR with small numbers',
-                desc: 'XOR works like this: same numbers cancel out to 0, different numbers give something else.<br><br><strong>Try it:</strong> What is 3 XOR 3?',
-                xorQuiz: { a: 3, b: 3, answer: 0 }
+                title: 'Expanding the pattern',
+                desc: 'This works for ANY matching pair: 3 and 3, 5 and 5, etc. Just copy your opponent\'s move on the other row.<br><br>You can also have <strong>multiple pairs</strong>: rows of 1, 1, 2, 2 is safe — two pairs! Whatever they do to one, you do to its match.',
             },
             {
-                title: 'XOR with different numbers',
-                desc: 'When numbers are different, XOR gives a non-zero result.<br><br><strong>Try it:</strong> What is 1 XOR 2?',
-                xorQuiz: { a: 1, b: 2, answer: 3 }
+                title: 'Adding singles',
+                desc: 'What about leftover single circles? In Misère Nim (last circle loses), an <strong>odd number of singles</strong> is good for you — your opponent will be forced to take the last one.<br><br>So: 2, 2, 1 is a winning position. The pair cancels out, and the single forces your opponent into the last take.',
             },
             {
-                title: 'XOR chains',
-                desc: 'You can XOR multiple numbers in a row. Do them one at a time, left to right.<br><br><strong>Try it:</strong> What is 1 XOR 2 XOR 3?<br><span style="font-size:12px;color:#888;">(Hint: 1 XOR 2 = 3, then 3 XOR 3 = ?)</span>',
-                xorQuiz: { a: null, b: null, answer: 0, label: '1 ⊕ 2 ⊕ 3' }
+                title: 'The XOR rule',
+                desc: 'The mathematical way to check if pairs balance out is called <strong>XOR</strong>. Here\'s all you need to know:<br><br>• If XOR of all row sizes = <strong>0</strong> → the position is <strong>safe</strong> (bad for whoever has to move)<br>• If XOR ≠ <strong>0</strong> → there\'s a winning move that makes it 0<br><br>Matching pairs always XOR to 0: 2 ⊕ 2 = 0, 5 ⊕ 5 = 0.',
             },
             {
-                title: 'The Classic map',
-                desc: 'Classic has rows of 1, 2, 3, 4, 5. XOR them all:<br>1 ⊕ 2 = 3, then 3 ⊕ 3 = 0, then 0 ⊕ 4 = 4, then 4 ⊕ 5 = ?<br><br><strong>What\'s the final XOR?</strong>',
-                xorQuiz: { a: null, b: null, answer: 1, label: '1 ⊕ 2 ⊕ 3 ⊕ 4 ⊕ 5' }
+                title: 'Quick XOR facts',
+                desc: '• Same numbers cancel: 3 ⊕ 3 = 0, 7 ⊕ 7 = 0<br>• Zero doesn\'t change anything: 0 ⊕ 5 = 5<br>• Order doesn\'t matter: 1 ⊕ 2 ⊕ 3 = 3 ⊕ 1 ⊕ 2<br>• Classic map (1,2,3,4,5): XOR = 1 (not 0, so first player can win!)<br><br>Your goal each turn: make a move so all the row sizes XOR to 0.',
             },
             {
-                title: 'Using it to win',
-                desc: 'Since Classic\'s XOR is 1 (not 0), the first player can win! Take 1 circle from row 5 (leaving 4):<br>1 ⊕ 2 ⊕ 3 ⊕ 4 ⊕ 4 = ?<br><br><strong>What\'s the XOR now?</strong>',
-                xorQuiz: { a: null, b: null, answer: 0, label: '1 ⊕ 2 ⊕ 3 ⊕ 4 ⊕ 4' }
-            },
-            {
-                title: 'Free calculator',
-                desc: 'Use this to practice XOR on any numbers. Type two numbers and see the result. When you\'re comfortable, try the puzzles!',
+                title: 'XOR calculator',
+                desc: 'Practice XOR with any two numbers. When you\'re comfortable, try the puzzles — they give you positions where XOR ≠ 0 and you find the move that makes it 0.',
                 xorCalculator: true
             },
             {
                 title: 'The endgame twist',
-                desc: 'This is <strong>Misère Nim</strong> — the last circle loses. XOR strategy works until only single circles remain. Then count the singles: <strong>odd</strong> number of singles = you\'re winning (opponent takes the last). Adjust your final moves to keep it odd.',
-            },
-            {
-                title: 'Practice with puzzles',
-                desc: 'The Puzzle mode gives you positions where XOR ≠ 0. Your job is to find the move that makes it 0. The more you practice, the faster you\'ll spot the patterns!',
+                desc: 'XOR strategy works until only isolated single circles remain. Then switch to counting: keep an <strong>odd</strong> number of singles so your opponent takes the last one.<br><br>With practice, you\'ll spot these patterns instantly. Go try the puzzles!',
             }
         ]
     }
@@ -3470,7 +3457,7 @@ const ACHIEVEMENT_DEFS = [
 const HARD_ACHIEVEMENT_DEFS = [
     { id: 'hard_speed_demon', name: 'Speed Demon', desc: 'Beat Hard AI with only 3 total seconds of thinking time (timer must be on)' },
     { id: 'hard_insanity', name: 'Insanity', desc: 'Beat Hard AI on Gigantic with every game mode active' },
-    { id: 'hard_mirror', name: 'Mirror Mirror on the 7th Wall...', desc: '???' },
+    { id: 'hard_mirror', name: 'Mirror Mirror on the 7th Wall...', desc: 'A 7th click reveals the mirror' },
     { id: 'hard_crazy_man', name: 'Crazy Man', desc: 'Complete a puzzle set perfectly in under 10 seconds' },
 ];
 
@@ -4124,20 +4111,23 @@ function renderPuzzle() {
             puzzleTimer.style.cssText = 'margin-bottom:12px; padding:8px; background:#f5f5f5; border:2px solid #999; border-radius:8px; font-size:14px; font-weight:bold; text-align:center; color:#555;';
             progressBar.parentNode.insertBefore(puzzleTimer, progressBar.nextSibling);
         }
-        // Mark this puzzle as interactive now
-        puzzleState.puzzleStartTime = Date.now();
-        // Clear old interval
-        if (puzzleState._timerInterval) clearInterval(puzzleState._timerInterval);
-        puzzleState._timerInterval = setInterval(() => {
-            const el = document.getElementById('puzzleTimerDisplay');
-            if (!el || !puzzleState.active) { clearInterval(puzzleState._timerInterval); return; }
-            const currentPuzzleTime = puzzleState.puzzleStartTime > 0 ? (Date.now() - puzzleState.puzzleStartTime) : 0;
-            const elapsed = (puzzleState.activeTime + currentPuzzleTime) / 1000;
-            const color = elapsed <= 10 ? '#27ae60' : '#e74c3c';
-            el.style.color = color;
-            el.style.borderColor = color;
-            el.textContent = `⏳ ${elapsed.toFixed(1)}s`;
-        }, 100);
+        // Only start timing if not already running (avoid restart on circle click re-render)
+        if (puzzleState.puzzleStartTime === 0) {
+            puzzleState.puzzleStartTime = Date.now();
+        }
+        // Only create interval if not already running
+        if (!puzzleState._timerInterval) {
+            puzzleState._timerInterval = setInterval(() => {
+                const el = document.getElementById('puzzleTimerDisplay');
+                if (!el || !puzzleState.active) { clearInterval(puzzleState._timerInterval); puzzleState._timerInterval = null; return; }
+                const currentPuzzleTime = puzzleState.puzzleStartTime > 0 ? (Date.now() - puzzleState.puzzleStartTime) : 0;
+                const elapsed = (puzzleState.activeTime + currentPuzzleTime) / 1000;
+                const color = elapsed <= 10 ? '#27ae60' : '#e74c3c';
+                el.style.color = color;
+                el.style.borderColor = color;
+                el.textContent = `⏳ ${elapsed.toFixed(1)}s`;
+            }, 100);
+        }
     }
 
     const rowNums = Object.keys(rows).map(Number).sort((a, b) => a - b);
@@ -4389,7 +4379,7 @@ async function recordPuzzleScore(name, points) {
 
 function exitPuzzleMode() {
     puzzleState.active = false;
-    if (puzzleState._timerInterval) clearInterval(puzzleState._timerInterval);
+    if (puzzleState._timerInterval) { clearInterval(puzzleState._timerInterval); puzzleState._timerInterval = null; }
     const xorInfo = document.getElementById('puzzleXorInfo');
     if (xorInfo) xorInfo.remove();
     const progressBar = document.getElementById('puzzleProgress');
