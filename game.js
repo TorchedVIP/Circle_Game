@@ -4082,6 +4082,8 @@ function startPuzzleSet() {
     puzzleState.active = true;
     puzzleState.selected = {};
     puzzleState.startTime = Date.now();
+    puzzleState.activeTime = 0;       // accumulated active solving time in ms
+    puzzleState.puzzleStartTime = Date.now(); // when current puzzle became interactive
 
     for (let i = 0; i < 5; i++) {
         puzzleState.puzzles.push(generatePuzzle());
@@ -4117,12 +4119,15 @@ function renderPuzzle() {
             puzzleTimer.style.cssText = 'margin-bottom:12px; padding:8px; background:#f5f5f5; border:2px solid #999; border-radius:8px; font-size:14px; font-weight:bold; text-align:center; color:#555;';
             progressBar.parentNode.insertBefore(puzzleTimer, progressBar.nextSibling);
         }
+        // Mark this puzzle as interactive now
+        puzzleState.puzzleStartTime = Date.now();
         // Clear old interval
         if (puzzleState._timerInterval) clearInterval(puzzleState._timerInterval);
         puzzleState._timerInterval = setInterval(() => {
             const el = document.getElementById('puzzleTimerDisplay');
             if (!el || !puzzleState.active) { clearInterval(puzzleState._timerInterval); return; }
-            const elapsed = (Date.now() - puzzleState.startTime) / 1000;
+            const currentPuzzleTime = puzzleState.puzzleStartTime > 0 ? (Date.now() - puzzleState.puzzleStartTime) : 0;
+            const elapsed = (puzzleState.activeTime + currentPuzzleTime) / 1000;
             const color = elapsed <= 10 ? '#27ae60' : '#e74c3c';
             el.style.color = color;
             el.style.borderColor = color;
@@ -4311,6 +4316,10 @@ function submitPuzzleMove() {
         showCorrectMove(originalRows);
     }
 
+    // Accumulate active solving time (pause during transition)
+    puzzleState.activeTime += (Date.now() - puzzleState.puzzleStartTime);
+    puzzleState.puzzleStartTime = 0; // paused
+
     puzzleState.selected = {};
     puzzleState.currentPuzzle++;
 
@@ -4339,7 +4348,7 @@ function submitPuzzleMove() {
             // Puzzle achievements
             if (puzzleState.correct === 5) {
                 unlockAchievement('perfect_puzzle');
-                const elapsed = (Date.now() - puzzleState.startTime) / 1000;
+                const elapsed = puzzleState.activeTime / 1000;
                 if (elapsed <= 20) {
                     unlockAchievement('stopwatch_puzzle');
                 }
