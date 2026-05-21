@@ -3813,6 +3813,7 @@ function applySavedTheme() {
 function renderUnlockedThemes() {
     const container = document.getElementById('unlockedThemes');
     if (!container) return;
+    if (loadedThemes.length === 0) return; // themes not loaded yet, skip
     const unlocked = getUnlockedThemes();
     const currentTheme = localStorage.getItem('circleGameTheme') || 'classic';
     container.innerHTML = '';
