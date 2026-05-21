@@ -1306,6 +1306,9 @@
                         You'll see a board where the position is <strong>not</strong> safe. Find the move that puts you in a winning position.<br>
                         Solve 5 puzzles per set. You earn 1 point for each correct answer.
                     </p>
+                    <p style="color:#667eea; font-size:13px; margin-top:10px; cursor:pointer;" onclick="showTutorial(); setTimeout(() => startTutorialSection('strategy'), 100);">
+                        💡 Need help? Check the <strong>🧠 Strategy tutorial</strong> to learn the math behind it.
+                    </p>
                 </div>
                 <button onclick="startPuzzleSet()" style="width:100%; background:#667eea; color:white; padding:15px; font-size:16px;">▶ Start Puzzle Set</button>
             </div>
@@ -1322,7 +1325,7 @@
                     </div>
                     <button class="sidebar-btn" onclick="showScoreboard()">🏆 Scoreboard</button>
                     <button class="sidebar-btn" onclick="showAchievementsModal()">🏅 Achievements</button>
-                    <button class="sidebar-btn" onclick="showTutorial()">📖 Tutorial</button>
+                    <button class="sidebar-btn" id="tutorialBtn" onclick="showTutorial()">📖 Tutorial</button>
                     <button class="sidebar-btn" onclick="showCredits()">📝 Credits</button>
                     <div class="sidebar-section" style="margin-top:14px;">
                         <label class="sidebar-label">🎨 Theme Code</label>

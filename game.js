@@ -1448,18 +1448,21 @@ function computerMove() {
 function findBestMove(difficulty) {
     const legalMoves = getAllLegalMoves();
     if (legalMoves.length === 0) return null;
+    // Safe moves avoid kill circles — use for random picks
+    const safeMoves = getSafeLegalMoves();
+    const randomPool = safeMoves.length > 0 ? safeMoves : legalMoves;
 
     if (difficulty === 'easy') {
         // Easy: prefer taking 1 circle (75% of the time), occasionally 2
-        const smallMoves = legalMoves.filter(m => m.positions.length === 1);
+        const smallMoves = randomPool.filter(m => m.positions.length === 1);
         if (smallMoves.length > 0 && Math.random() < 0.75) {
             return smallMoves[Math.floor(Math.random() * smallMoves.length)];
         }
-        const medMoves = legalMoves.filter(m => m.positions.length <= 2);
+        const medMoves = randomPool.filter(m => m.positions.length <= 2);
         if (medMoves.length > 0) {
             return medMoves[Math.floor(Math.random() * medMoves.length)];
         }
-        return legalMoves[Math.floor(Math.random() * legalMoves.length)];
+        return randomPool[Math.floor(Math.random() * randomPool.length)];
     }
 
     // For doubles mode, use the doubles-aware search
@@ -1475,11 +1478,11 @@ function findBestMove(difficulty) {
         if (optimalMove && Math.random() < 0.65) {
             return optimalMove;
         }
-        return legalMoves[Math.floor(Math.random() * legalMoves.length)];
+        return randomPool[Math.floor(Math.random() * randomPool.length)];
     }
 
     // Hard: always play optimally if possible
-    return optimalMove || legalMoves[Math.floor(Math.random() * legalMoves.length)];
+    return optimalMove || randomPool[Math.floor(Math.random() * randomPool.length)];
 }
 
 function getAllLegalMoves() {
@@ -1513,10 +1516,26 @@ function getAllLegalMoves() {
         }
     }
 
+    let filtered = moves;
     if (gameState.diceMode && gameState.diceCap > 0) {
-        return moves.filter(m => m.positions.length <= gameState.diceCap);
+        filtered = filtered.filter(m => m.positions.length <= gameState.diceCap);
     }
-    return moves;
+    return filtered;
+}
+
+// Get legal moves that avoid kill circles (for AI use)
+function getSafeLegalMoves() {
+    const moves = getAllLegalMoves();
+    if (!gameState.portalMode || gameState.killCircles.length === 0) return moves;
+    return moves.filter(m => {
+        for (const pos of m.positions) {
+            const key = `${m.row}-${pos}`;
+            if (isKillCircle(key)) return false;
+            const partner = getPortalPartner(key);
+            if (partner && isKillCircle(partner)) return false;
+        }
+        return true;
+    });
 }
 
 function getSegments(row) {
@@ -2251,7 +2270,7 @@ function checkLeaderboardThemes(board) {
         return;
     }
 
-    // Collect all leaderboards into one list of sorted arrays
+    // Collect all leaderboards
     const leaderboards = [];
     for (const diff of ['easy', 'medium', 'hard']) {
         const entries = board.singlePlayer?.[diff] || [];
@@ -2260,16 +2279,21 @@ function checkLeaderboardThemes(board) {
     if ((board.multiplayer || []).length > 0) leaderboards.push(board.multiplayer);
     if ((board.puzzles || []).length > 0) leaderboards.push(board.puzzles);
     for (const mode of Object.keys(board.modes || {})) {
-        if (board.modes[mode].length > 0) leaderboards.push(board.modes[mode]);
+        if ((board.modes[mode] || []).length > 0) leaderboards.push(board.modes[mode]);
     }
 
-    // Check position on each leaderboard (skip VIP entries)
+    // Find best position across all leaderboards (excluding VIP from ranking)
     let bestPosition = 999;
     for (const entries of leaderboards) {
-        const filtered = entries.filter(e => e.name.toLowerCase() !== 'vip');
-        for (let i = 0; i < Math.min(3, filtered.length); i++) {
-            if (filtered[i].name.toLowerCase() === name) {
-                bestPosition = Math.min(bestPosition, i + 1);
+        // Filter out VIP and find this player's rank
+        let rank = 0;
+        for (let i = 0; i < entries.length; i++) {
+            if (entries[i].name.toLowerCase() === 'vip') continue;
+            rank++;
+            if (rank > 3) break;
+            if (entries[i].name.toLowerCase() === name) {
+                bestPosition = Math.min(bestPosition, rank);
+                break;
             }
         }
     }
@@ -2278,7 +2302,7 @@ function checkLeaderboardThemes(board) {
     const unlocked = getUnlockedThemes();
     const currentTheme = localStorage.getItem('circleGameTheme') || 'classic';
 
-    // Remove leaderboard themes if no longer holding position
+    // Remove leaderboard themes
     const lbThemes = ['champion', 'silver', 'bronze'];
     for (const t of lbThemes) {
         const idx = unlocked.indexOf(t);
@@ -2286,7 +2310,7 @@ function checkLeaderboardThemes(board) {
     }
 
     // Grant based on best position
-    if (bestPosition === 1) unlocked.push('champion');
+    if (bestPosition <= 1) unlocked.push('champion');
     if (bestPosition <= 2) unlocked.push('silver');
     if (bestPosition <= 3) unlocked.push('bronze');
 
@@ -2295,8 +2319,10 @@ function checkLeaderboardThemes(board) {
     // If current theme was a leaderboard theme they no longer have, reset to classic
     if (lbThemes.includes(currentTheme) && !unlocked.includes(currentTheme)) {
         localStorage.setItem('circleGameTheme', 'classic');
-        const theme = loadedThemes.find(t => t.code === 'classic');
-        if (theme) document.body.style.background = theme.background;
+        if (loadedThemes.length > 0) {
+            const theme = loadedThemes.find(t => t.code === 'classic');
+            if (theme) document.body.style.background = theme.background;
+        }
     }
 
     renderUnlockedThemes();
@@ -2373,6 +2399,9 @@ async function refreshUnlocks() {
             if (wins >= 5) puzzleBtn.classList.remove('hidden');
             else puzzleBtn.classList.add('hidden');
         }
+
+        // Re-check tutorial blink now that playerLevel is set
+        startTutorialBlink();
 
     } catch (e) {
         console.error('Failed to check unlocks:', e);
@@ -2726,6 +2755,36 @@ const TUTORIALS = {
                 title: 'Try it out!',
                 desc: null,
                 suggest: { difficulty: 'easy', turnOrder: 'player-first', modes: { cascadeMode: true } }
+            }
+        ]
+    },
+    strategy: {
+        title: '🧠 Strategy',
+        unlockWins: 5,
+        steps: [
+            {
+                title: 'The winning secret',
+                desc: 'This game has a mathematical pattern behind it. The key is <strong>XOR</strong> (exclusive or) — a binary operation. If you can make the XOR of all row sizes equal <strong>0</strong> after your move, you\'re in a winning position.',
+            },
+            {
+                title: 'What is XOR?',
+                desc: 'XOR compares numbers in binary, bit by bit. If the bits are <strong>different</strong>, the result is 1. If they\'re the <strong>same</strong>, the result is 0.<br><br>Example: 3 XOR 5 → 011 XOR 101 = 110 = 6<br>Example: 3 XOR 3 → 011 XOR 011 = 000 = 0',
+            },
+            {
+                title: 'How to use it',
+                desc: 'Count the circles remaining in each row (only contiguous groups matter — holes split a row into segments). XOR all the segment sizes together.<br><br>If the result is <strong>0</strong>, the position is <strong>bad for you</strong> (whoever just moved put you here).<br>If it\'s <strong>not 0</strong>, there\'s always a move that makes it 0 — find it!',
+            },
+            {
+                title: 'Example: Classic map',
+                desc: 'Classic starts with rows of 1, 2, 3, 4, 5.<br>XOR: 1 ⊕ 2 ⊕ 3 ⊕ 4 ⊕ 5 = 1<br>Since it\'s not 0, the first player can win! Try taking 1 from row 5 (leaving 4): 1 ⊕ 2 ⊕ 3 ⊕ 4 ⊕ 4 = 0 ✓',
+            },
+            {
+                title: 'The endgame twist',
+                desc: 'This is <strong>Misère Nim</strong> — the last circle loses. The XOR strategy works until only single circles remain. Then count the singles: if there\'s an <strong>odd</strong> number, you want to leave it odd (force opponent to take the last). Adjust your final moves accordingly.',
+            },
+            {
+                title: 'Practice with puzzles',
+                desc: 'The Puzzle mode gives you positions where XOR ≠ 0. Your job is to find the move that makes it 0. The more you practice, the faster you\'ll spot the patterns!',
             }
         ]
     }
@@ -4277,8 +4336,16 @@ window.onload = () => {
     // Initialize authentication first
     initializeAuth();
 
-    // Load themes and apply saved one
-    loadThemes().then(() => applySavedTheme());
+    // Load themes and apply saved one, then re-check leaderboard themes
+    loadThemes().then(() => {
+        applySavedTheme();
+        // Re-run leaderboard theme check now that themes are loaded (swatches will render)
+        if (currentUser) {
+            fetch('/scoreboard').then(r => r.json()).then(board => {
+                checkLeaderboardThemes(board);
+            }).catch(() => {});
+        }
+    });
 
     // Load tutorial state
     loadSeenTutorials();
