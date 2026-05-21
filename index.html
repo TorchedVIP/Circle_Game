@@ -875,6 +875,7 @@
         .theme-swatch.active {
             border-color: #333;
             box-shadow: 0 0 0 2px white, 0 0 0 4px #667eea;
+            transform: scale(1.15);
         }
 
         /* Responsive: stack on small screens — sidebar on top */
@@ -901,6 +902,41 @@
             }
             .sidebar-section {
                 width: 100%;
+            }
+            /* Hide gigantic map option on mobile */
+            .mobile-hide-gigantic {
+                display: none !important;
+            }
+            /* Scoreboard fixes */
+            .scoreboard-modal {
+                max-width: 95vw !important;
+                padding: 16px !important;
+            }
+            .score-tabs {
+                gap: 4px;
+            }
+            .tab-btn {
+                padding: 6px 12px;
+                font-size: 12px;
+            }
+            .score-table {
+                font-size: 12px;
+            }
+            .score-table th, .score-table td {
+                padding: 5px 6px;
+            }
+            /* Circles smaller on mobile */
+            .circle {
+                width: 36px;
+                height: 36px;
+            }
+            /* Theme swatches bigger touch targets */
+            .theme-swatch {
+                width: 36px;
+                height: 36px;
+            }
+            .container {
+                padding: 16px;
             }
         }
     </style>
@@ -1018,7 +1054,7 @@
                     <label style="display: block; margin: 10px 0; font-size: 16px;">
                         <input type="radio" name="single-map" value="hexagonal"> Hexagon (hexagon with holes)
                     </label>
-                    <label style="display: block; margin: 10px 0; font-size: 16px;">
+                    <label class="mobile-hide-gigantic" style="display: block; margin: 10px 0; font-size: 16px;">
                         <input type="radio" name="single-map" value="gigantic"> Gigantic (1,2,3,...,10)
                     </label>
                     <label style="display: block; margin: 10px 0; font-size: 16px;">
@@ -1078,7 +1114,7 @@
                         <input type="radio" name="single-map" value="custom"> 🛠️ <strong>Custom Map</strong> <span style="color: #1565c0; font-size: 13px;">(unlocked – 5+ wins)</span>
                     </label>
                     <div style="font-size: 13px; color: #555; margin-top: 6px;">
-                        Design your own board layout.
+                        Design your own board layout. <strong style="color:#e74c3c;">Note:</strong> Wins on custom maps don't count for the leaderboard or achievements.
                     </div>
                     <button onclick="openMapEditor()" style="margin-top:8px; background:#2196f3; color:white; padding:8px 14px; font-size:13px;">Open Editor</button>
                 </div>
@@ -1117,7 +1153,7 @@
                     <label style="display: block; margin: 10px 0; font-size: 16px;">
                         <input type="radio" name="local-map" value="hexagonal"> Hexagon (hexagon with holes)
                     </label>
-                    <label style="display: block; margin: 10px 0; font-size: 16px;">
+                    <label class="mobile-hide-gigantic" style="display: block; margin: 10px 0; font-size: 16px;">
                         <input type="radio" name="local-map" value="gigantic"> Gigantic (1,2,3,...,10)
                     </label>
                     <label style="display: block; margin: 10px 0; font-size: 16px;">
@@ -1204,7 +1240,7 @@
                     <label style="display: block; margin: 10px 0; font-size: 16px;">
                         <input type="radio" name="multi-map" value="hexagonal"> Hexagon (hexagon with holes)
                     </label>
-                    <label style="display: block; margin: 10px 0; font-size: 16px;">
+                    <label class="mobile-hide-gigantic" style="display: block; margin: 10px 0; font-size: 16px;">
                         <input type="radio" name="multi-map" value="gigantic"> Gigantic (1,2,3,...,10)
                     </label>
                     <label style="display: block; margin: 10px 0; font-size: 16px;">
@@ -1268,7 +1304,7 @@
                     <h3 style="color:#333; margin-bottom:8px;">🧩 Nim Puzzles</h3>
                     <p style="color:#666; font-size:14px; line-height:1.5;">
                         You'll see a board where the position is <strong>not</strong> safe. Find the move that puts you in a winning position.<br>
-                        Solve 5 puzzles per set. Score: 5/5 = 3pts, 4/5 = 2pts, 3/5 = 1pt.
+                        Solve 5 puzzles per set. You earn 1 point for each correct answer.
                     </p>
                 </div>
                 <button onclick="startPuzzleSet()" style="width:100%; background:#667eea; color:white; padding:15px; font-size:16px;">▶ Start Puzzle Set</button>
@@ -1344,6 +1380,7 @@
             <div id="gameState">Loading...</div>
             <div id="diceDisplay" class="hidden" style="margin: 10px 0; padding: 10px; background: #fff8e1; border: 2px solid #ffb300; border-radius: 8px; font-size: 18px; font-weight: bold; text-align: center;"></div>
             <div id="timerDisplay" class="hidden" style="margin: 10px 0; padding: 10px; background: #fdecea; border: 2px solid #e74c3c; border-radius: 8px; font-size: 18px; font-weight: bold; text-align: center; color: #c0392b;"></div>
+            <div id="totalTimerDisplay" class="hidden" style="margin: 10px 0; padding: 8px; background: #f5f5f5; border: 2px solid #999; border-radius: 8px; font-size: 14px; font-weight: bold; text-align: center; color: #555;"></div>
             <div id="gameCode" class="game-code hidden">
                 <p>Your Code:</p>
                 <div class="code" id="codeDisplay"></div>
@@ -1352,7 +1389,7 @@
             <div class="board" id="board"></div>
 
             <div class="controls">
-                <button id="submitBtn" onclick="submitMove()">Submit Move</button>
+                <button id="submitBtn" onclick="submitMove()">Submit Move (enter)</button>
                 <button id="replayBtn" onclick="playAgain()" class="hidden">Play Again</button>
                 <button id="mainMenuBtn" onclick="returnToMainMenu()">Main Menu</button>
             </div>

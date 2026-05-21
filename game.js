@@ -40,6 +40,12 @@ function showMainMenu() {
         refreshUnlocks();
         loadAchievements(currentUser.username);
         checkWinAchievements(currentUser.username);
+        // Check leaderboard themes on login
+        fetch('/scoreboard').then(r => r.json()).then(board => {
+            checkLeaderboardThemes(board);
+            // Re-render themes if they're loaded
+            if (loadedThemes.length > 0) renderUnlockedThemes();
+        }).catch(() => {});
         startTutorialBlink();
     } else {
         if (sidebarUser) sidebarUser.textContent = 'Guest';
@@ -257,6 +263,7 @@ let gameState = {
     timerSeconds: 0,
     timerInterval: null,
     timerRemaining: 0,
+    timerUsedTotal: 0, // cumulative seconds used across all turns this game
     // Secret mirror mode — every player move is mirrored by the computer on the opposite side
     mirrorMode: false,
     // Track initial holes in the map (positions that start removed and render as empty space)
@@ -322,6 +329,27 @@ function updateTimerDisplay() {
     } else {
         el.classList.add('hidden');
     }
+    updateTotalTimerDisplay();
+}
+
+function updateTotalTimerDisplay() {
+    const el = document.getElementById('totalTimerDisplay');
+    if (!el) return;
+    if (!hardModeEnabled || gameState.timerSeconds <= 0 || gameMode !== 'single') {
+        el.classList.add('hidden');
+        return;
+    }
+    // Show cumulative time used so far (plus current turn's elapsed time)
+    let currentTurnUsed = 0;
+    if (gameState.isPlayerTurn && gameState.timerRemaining > 0 && !gameState.gameOver) {
+        currentTurnUsed = gameState.timerSeconds - gameState.timerRemaining;
+    }
+    const total = gameState.timerUsedTotal + currentTurnUsed;
+    el.classList.remove('hidden');
+    const color = total <= 3 ? '#27ae60' : '#e74c3c';
+    el.style.borderColor = color;
+    el.style.color = color;
+    el.textContent = `⏳ Total: ${total}s used`;
 }
 
 function autoMoveForPlayer() {
@@ -526,6 +554,13 @@ function showGameScreen() {
 }
 
 function playAgain() {
+    // Reset puzzle-specific handlers
+    document.getElementById('replayBtn').onclick = playAgain;
+    document.getElementById('submitBtn').onclick = submitMove;
+    document.getElementById('mainMenuBtn').onclick = returnToMainMenu;
+    const progressBar = document.getElementById('puzzleProgress');
+    if (progressBar) progressBar.remove();
+
     if (gameMode === 'single') {
         initGame();
         if (!gameState.isPlayerTurn) {
@@ -691,6 +726,7 @@ function initGame() {
     gameState.killCircles = [];
     gameState._hitKillCircle = false;
     gameState.slayerStreak = 0;
+    gameState.timerUsedTotal = 0;
 
     if (gameMode === 'single') {
         if (gameState.turnOrder === 'player-first') {
@@ -886,6 +922,11 @@ function toggleCircle(row, pos) {
 function submitMove() {
     if (gameState.gameOver || !gameState.isPlayerTurn) return;
     if (gameState.pendingCascade) return;
+
+    // Track time used this turn before clearing timer
+    if (gameState.timerSeconds > 0 && gameState.timerRemaining > 0) {
+        gameState.timerUsedTotal += (gameState.timerSeconds - gameState.timerRemaining);
+    }
     clearTurnTimer();
 
     const selectedKeys = Object.keys(gameState.selected);
@@ -1727,19 +1768,41 @@ function updateGameState() {
             if (!gameState.resultRecorded) {
                 gameState.resultRecorded = true;
                 if (playerWon && !tutorialActive) {
-                    recordSinglePlayerWin(gameState.playerName, gameState.difficulty);
-                    // Achievements
-                    if (gameState.difficulty === 'medium') unlockAchievement('novice');
-                    if (gameState.difficulty === 'hard')   unlockAchievement('patterner');
-                    if (gameState.difficulty === 'hard' && gameState.turnOrder === 'computer-first') {
-                        unlockAchievement('cheater');
+                    // Custom maps don't count for leaderboard or achievements
+                    const isOfficialMap = gameState.map !== 'custom';
+                    if (isOfficialMap) {
+                        recordSinglePlayerWin(gameState.playerName, gameState.difficulty);
                     }
-                    // CrAZy tAxi: win with ALL modifiers on
-                    if (gameState.diceMode && gameState.doublesMode && gameState.armourMode &&
-                        gameState.sandMode && gameState.cascadeMode && gameState.portalMode) {
-                        unlockAchievement('crazy_taxi');
+                    // Achievements only on official maps
+                    if (isOfficialMap) {
+                        if (gameState.difficulty === 'medium') unlockAchievement('novice');
+                        if (gameState.difficulty === 'hard')   unlockAchievement('patterner');
+                        if (gameState.difficulty === 'hard' && gameState.turnOrder === 'computer-first') {
+                            unlockAchievement('cheater');
+                        }
+                        // CrAZy tAxi: win with ALL modifiers on
+                        if (gameState.diceMode && gameState.doublesMode && gameState.armourMode &&
+                            gameState.sandMode && gameState.cascadeMode && gameState.portalMode) {
+                            unlockAchievement('crazy_taxi');
+                        }
+                        // Hard mode achievements
+                        if (hardModeEnabled && gameState.difficulty === 'hard') {
+                            // Speed Demon: beat hard with 7 or fewer total seconds of timer use
+                            if (gameState.timerSeconds > 0 && gameState.timerUsedTotal <= 3) {
+                                unlockAchievement('hard_speed_demon');
+                            }
+                            // Insanity: beat hard on Gigantic with all modes
+                            if (gameState.map === 'gigantic' && gameState.diceMode && gameState.doublesMode &&
+                                gameState.armourMode && gameState.sandMode && gameState.cascadeMode && gameState.portalMode) {
+                                unlockAchievement('hard_insanity');
+                            }
+                            // Mirror Mirror: beat hard on mirror mode
+                            if (gameState.mirrorMode) {
+                                unlockAchievement('hard_mirror');
+                            }
+                        }
+                        checkWinAchievements(gameState.playerName);
                     }
-                    checkWinAchievements(gameState.playerName);
                 }
                 // Tutorial step 3 win check
                 if (playerWon && checkTutorialWin()) {
@@ -2313,8 +2376,13 @@ async function refreshUnlocks() {
 // ============ MAP EDITOR & PREVIEW ============
 let customMapGrid = Array.from({ length: 7 }, () => Array(7).fill(false));
 
+function getMapEditorSize() {
+    return window.innerWidth <= 550 ? 6 : 7;
+}
+
 function openMapEditor() {
-    customMapGrid = Array.from({ length: 7 }, () => Array(7).fill(false));
+    const size = getMapEditorSize();
+    customMapGrid = Array.from({ length: size }, () => Array(size).fill(false));
     renderMapEditor();
     document.getElementById('mapEditorModal').classList.add('show');
 }
@@ -2326,14 +2394,15 @@ function closeMapEditor() {
 function renderMapEditor() {
     const grid = document.getElementById('mapEditorGrid');
     grid.innerHTML = '';
-    for (let r = 0; r < 7; r++) {
+    const size = customMapGrid.length;
+    for (let r = 0; r < size; r++) {
         const rowDiv = document.createElement('div');
         rowDiv.style.cssText = 'display:flex; gap:4px; align-items:center;';
         const label = document.createElement('span');
         label.style.cssText = 'width:24px; font-size:12px; color:#999; text-align:right; margin-right:4px;';
         label.textContent = r + 1;
         rowDiv.appendChild(label);
-        for (let c = 0; c < 7; c++) {
+        for (let c = 0; c < customMapGrid[r].length; c++) {
             const cell = document.createElement('div');
             cell.className = 'map-editor-cell' + (customMapGrid[r][c] ? ' active' : '');
             cell.onclick = () => {
@@ -2347,14 +2416,16 @@ function renderMapEditor() {
 }
 
 function clearMapEditor() {
-    customMapGrid = Array.from({ length: 7 }, () => Array(7).fill(false));
+    const size = getMapEditorSize();
+    customMapGrid = Array.from({ length: size }, () => Array(size).fill(false));
     renderMapEditor();
 }
 
 function saveCustomMap() {
     // Save the grid — crop empty rows/columns from the edges
+    const size = customMapGrid.length;
     let hasCircles = false;
-    for (let r = 0; r < 7; r++) {
+    for (let r = 0; r < size; r++) {
         if (customMapGrid[r].some(v => v)) { hasCircles = true; break; }
     }
     if (!hasCircles) {
@@ -2363,9 +2434,9 @@ function saveCustomMap() {
     }
 
     // Find bounding box of active cells
-    let minRow = 7, maxRow = -1, minCol = 7, maxCol = -1;
-    for (let r = 0; r < 7; r++) {
-        for (let c = 0; c < 7; c++) {
+    let minRow = size, maxRow = -1, minCol = size, maxCol = -1;
+    for (let r = 0; r < size; r++) {
+        for (let c = 0; c < customMapGrid[r].length; c++) {
             if (customMapGrid[r][c]) {
                 if (r < minRow) minRow = r;
                 if (r > maxRow) maxRow = r;
@@ -2932,7 +3003,7 @@ function startTutorialMiniGame(step, area) {
     renderMini();
 
     const submitBtn = document.createElement('button');
-    submitBtn.textContent = 'Submit Move';
+    submitBtn.textContent = 'Submit Move (enter)';
     submitBtn.style.cssText = 'background:#667eea; color:white; margin-right:8px;';
     submitBtn.onclick = () => {
         const keys = Object.keys(miniSelected);
@@ -3234,7 +3305,14 @@ const ACHIEVEMENT_DEFS = [
     { id: 'secret_skin',     name: '???',                    desc: 'A secret achievement...', hidden: true },
 ];
 
+const HARD_ACHIEVEMENT_DEFS = [
+    { id: 'hard_speed_demon', name: 'Speed Demon', desc: 'Beat Hard AI with only 4 total seconds of thinking time (timer must be on)' },
+    { id: 'hard_insanity', name: 'Insanity', desc: 'Beat Hard AI on Gigantic with every game mode active' },
+    { id: 'hard_mirror', name: 'Mirror Mirror on the 7th Wall...', desc: 'Beat the Hard AI on Mirror Mode' }
+];
+
 let unlockedAchievements = new Set();
+let hardModeEnabled = false;
 
 async function loadAchievements(name) {
     if (!name) return;
@@ -3285,8 +3363,10 @@ async function unlockAchievement(id) {
 }
 
 function showAchievementToast(id) {
-    const def = ACHIEVEMENT_DEFS.find(a => a.id === id);
+    const def = ACHIEVEMENT_DEFS.find(a => a.id === id) || HARD_ACHIEVEMENT_DEFS.find(a => a.id === id);
     if (!def) return;
+    const isHard = HARD_ACHIEVEMENT_DEFS.some(a => a.id === id);
+    const bgColor = isHard ? '#e74c3c' : '#667eea';
     const toast = document.createElement('div');
     toast.style.cssText = [
         'position:fixed', 'bottom:24px', 'left:50%', 'transform:translateX(-50%)',
@@ -3296,7 +3376,7 @@ function showAchievementToast(id) {
         'display:flex', 'align-items:center', 'gap:10px',
         'transition:opacity 0.3s'
     ].join(';');
-    toast.innerHTML = `<div style="width:28px;height:28px;border-radius:50%;background:#667eea;border:2px solid white;flex-shrink:0;display:flex;align-items:center;justify-content:center;"><span style="color:white;font-size:12px;">✓</span></div><div><div style="font-size:11px;opacity:0.7;text-transform:uppercase;letter-spacing:1px">Achievement Unlocked</div><div>${def.name}</div></div>`;
+    toast.innerHTML = `<div style="width:28px;height:28px;border-radius:50%;background:${bgColor};border:2px solid white;flex-shrink:0;display:flex;align-items:center;justify-content:center;"><span style="color:white;font-size:12px;">✓</span></div><div><div style="font-size:11px;opacity:0.7;text-transform:uppercase;letter-spacing:1px">${isHard ? '💀 Hard Achievement' : 'Achievement Unlocked'}</div><div>${def.name}</div></div>`;
     document.body.appendChild(toast);
     setTimeout(() => { toast.style.opacity = '0'; setTimeout(() => toast.remove(), 300); }, 3200);
 }
@@ -3555,6 +3635,71 @@ function renderAchievements(unlockedSet, container) {
         grid.appendChild(card);
     });
     container.appendChild(grid);
+
+    // Hard mode achievements section
+    // Check if all normal (non-hidden) achievements are unlocked, excluding VIP/L0n3W01f-dependent ones
+    const excludeFromHardUnlock = new Set(['oops', 'wolf_slayer']);
+    const normalAchievements = ACHIEVEMENT_DEFS.filter(d => !d.hidden && !excludeFromHardUnlock.has(d.id));
+    const allNormalUnlocked = normalAchievements.every(d => unlockedSet.has(d.id));
+
+    if (allNormalUnlocked || hardModeEnabled) {
+        const hardSection = document.createElement('div');
+        hardSection.style.cssText = 'margin-top:20px; border-top:2px solid #e74c3c; padding-top:16px;';
+
+        if (!hardModeEnabled) {
+            // Show unlock button
+            const unlockBtn = document.createElement('button');
+            unlockBtn.textContent = '💀 Enable Hard Mode Achievements';
+            unlockBtn.style.cssText = 'width:100%; background:#e74c3c; color:white; padding:12px; font-size:14px; font-weight:bold; border:none; border-radius:8px; cursor:pointer;';
+            unlockBtn.onclick = () => {
+                if (confirm('Do you want to enable hard mode achievements?')) {
+                    if (confirm('Are you absolutely certain?')) {
+                        hardModeEnabled = true;
+                        localStorage.setItem('circleGameHardMode', 'true');
+                        renderAchievements(unlockedSet, container);
+                    }
+                }
+            };
+            hardSection.appendChild(unlockBtn);
+        } else {
+            // Show hard achievements
+            const hardTitle = document.createElement('h3');
+            hardTitle.style.cssText = 'color:#e74c3c; font-size:14px; margin-bottom:10px; text-transform:uppercase; letter-spacing:1px;';
+            hardTitle.textContent = '💀 Hard Mode';
+            hardSection.appendChild(hardTitle);
+
+            const hardGrid = document.createElement('div');
+            hardGrid.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:10px;';
+
+            HARD_ACHIEVEMENT_DEFS.forEach(def => {
+                const unlocked = unlockedSet.has(def.id);
+                const card = document.createElement('div');
+                card.style.cssText = `
+                    padding:10px 12px; border-radius:10px; border:2px solid ${unlocked ? '#e74c3c' : '#eee'};
+                    background:${unlocked ? '#fdecea' : '#fafafa'};
+                    display:flex; align-items:center; gap:10px;
+                `;
+                const circleIcon = document.createElement('div');
+                circleIcon.style.cssText = `
+                    width:36px; height:36px; border-radius:50%; flex-shrink:0;
+                    border:3px solid ${unlocked ? '#e74c3c' : '#ccc'};
+                    background:${unlocked ? '#e74c3c' : 'white'};
+                    display:flex; align-items:center; justify-content:center;
+                `;
+                if (unlocked) circleIcon.innerHTML = '<span style="color:white;font-size:14px;font-weight:bold;">✓</span>';
+                const textDiv = document.createElement('div');
+                textDiv.innerHTML = `
+                    <div style="font-weight:bold;font-size:13px;color:${unlocked ? '#333' : '#bbb'}">${def.name}</div>
+                    <div style="font-size:11px;color:${unlocked ? '#777' : '#ccc'};margin-top:2px">${def.desc}</div>
+                `;
+                card.appendChild(circleIcon);
+                card.appendChild(textDiv);
+                hardGrid.appendChild(card);
+            });
+            hardSection.appendChild(hardGrid);
+        }
+        container.appendChild(hardSection);
+    }
 }
 
 // ============ THEME CODES ============
@@ -3614,6 +3759,15 @@ function applyThemeCode() {
             if (el) el.classList.remove('hidden');
         });
         alert('🔓 All modes unlocked!');
+        return;
+    }
+
+    // Secret code: force unlock hard mode achievements
+    if (code === 'ultranightmare') {
+        document.getElementById('themeCodeInput').value = '';
+        hardModeEnabled = true;
+        localStorage.setItem('circleGameHardMode', 'true');
+        alert('💀 Hard mode achievements forcibly unlocked. Good luck.');
         return;
     }
 
@@ -3888,6 +4042,55 @@ function togglePuzzleCircle(row, pos) {
     renderPuzzle();
 }
 
+function findCorrectPuzzleMove(puzzleRows) {
+    // Find any move that results in nimSum === 0
+    const rowNums = Object.keys(puzzleRows).map(Number).sort((a, b) => a - b);
+    for (const r of rowNums) {
+        const circles = puzzleRows[r];
+        let inSeg = false, segStart = 0;
+        for (let i = 0; i <= circles.length; i++) {
+            if (i < circles.length && circles[i] === 0) {
+                if (!inSeg) { segStart = i; inSeg = true; }
+            } else {
+                if (inSeg) {
+                    for (let start = segStart; start < i; start++) {
+                        for (let end = start; end < i; end++) {
+                            const testRows = JSON.parse(JSON.stringify(puzzleRows));
+                            for (let p = start; p <= end; p++) testRows[r][p] = 1;
+                            if (computeNimSumFromRows(testRows) === 0) {
+                                return { row: r, positions: Array.from({ length: end - start + 1 }, (_, j) => start + j) };
+                            }
+                        }
+                    }
+                    inSeg = false;
+                }
+            }
+        }
+    }
+    return null;
+}
+
+function showCorrectMove(puzzleRows) {
+    const move = findCorrectPuzzleMove(puzzleRows);
+    if (!move) return;
+    // Highlight the correct circles in red on the board
+    const board = document.getElementById('board');
+    const rowDivs = board.querySelectorAll('.row');
+    const rowNums = Object.keys(puzzleRows).map(Number).sort((a, b) => a - b);
+    const rowIdx = rowNums.indexOf(move.row);
+    if (rowIdx < 0) return;
+    const circlesDiv = rowDivs[rowIdx]?.querySelector('.circles');
+    if (!circlesDiv) return;
+    const circleEls = circlesDiv.querySelectorAll('.circle');
+    for (const p of move.positions) {
+        if (circleEls[p]) {
+            circleEls[p].style.background = '#e74c3c';
+            circleEls[p].style.borderColor = '#c0392b';
+            circleEls[p].style.color = 'white';
+        }
+    }
+}
+
 function submitPuzzleMove() {
     const selectedKeys = Object.keys(puzzleState.selected);
     if (selectedKeys.length === 0) { alert('Select at least one circle'); return; }
@@ -3901,7 +4104,8 @@ function submitPuzzleMove() {
     }
 
     // Apply the move to a copy and check if it's a winning move
-    const rows = JSON.parse(JSON.stringify(puzzleState.puzzles[puzzleState.currentPuzzle]));
+    const originalRows = puzzleState.puzzles[puzzleState.currentPuzzle];
+    const rows = JSON.parse(JSON.stringify(originalRows));
     for (const p of positions) rows[row][p] = 1;
 
     const nimSum = computeNimSumFromRows(rows);
@@ -3913,15 +4117,20 @@ function submitPuzzleMove() {
     const stateDiv = document.getElementById('gameState');
     stateDiv.textContent = correct
         ? `✅ Correct! That's a winning move. (${puzzleState.correct}/${puzzleState.currentPuzzle + 1})`
-        : `❌ Not quite — that position isn't safe. (${puzzleState.correct}/${puzzleState.currentPuzzle + 1})`;
+        : `❌ Not quite — the correct move is shown in red. (${puzzleState.correct}/${puzzleState.currentPuzzle + 1})`;
     stateDiv.className = correct ? 'player-turn' : 'game-over';
+
+    // Show correct move in red if wrong
+    if (!correct) {
+        showCorrectMove(originalRows);
+    }
 
     puzzleState.selected = {};
     puzzleState.currentPuzzle++;
 
     if (puzzleState.currentPuzzle >= 5) {
         // Set complete
-        const points = puzzleState.correct >= 5 ? 3 : puzzleState.correct >= 4 ? 2 : puzzleState.correct >= 3 ? 1 : 0;
+        const points = puzzleState.correct;
         setTimeout(() => {
             const stateDiv2 = document.getElementById('gameState');
             stateDiv2.className = 'game-over';
@@ -3958,8 +4167,8 @@ function submitPuzzleMove() {
             puzzleState.active = false;
         }, 1500);
     } else {
-        // Next puzzle after a short delay
-        setTimeout(() => renderPuzzle(), 1500);
+        // Next puzzle after a delay (longer if wrong so they can see the correct move)
+        setTimeout(() => renderPuzzle(), correct ? 1500 : 3000);
     }
 }
 
@@ -4067,6 +4276,9 @@ window.onload = () => {
     // Load tutorial state
     loadSeenTutorials();
 
+    // Load hard mode state
+    hardModeEnabled = localStorage.getItem('circleGameHardMode') === 'true';
+
     const difficultyRadio = document.querySelector('input[name="difficulty"][value="medium"]');
     if (difficultyRadio) difficultyRadio.checked = true;
 
@@ -4074,4 +4286,14 @@ window.onload = () => {
     if (savedLocal2) document.getElementById('localPlayer2Name').value = savedLocal2;
 
     refreshUnlocks();
+
+    // Enter key submits move when game screen is visible
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !document.getElementById('gameScreen').classList.contains('hidden')) {
+            const submitBtn = document.getElementById('submitBtn');
+            if (submitBtn && !submitBtn.disabled) {
+                submitBtn.click();
+            }
+        }
+    });
 };
