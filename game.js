@@ -551,6 +551,12 @@ function closeCodeModal() {
 function showGameScreen() {
     document.getElementById('mainMenuScreen').classList.add('hidden');
     document.getElementById('gameScreen').classList.remove('hidden');
+    // Reset handlers in case puzzle mode changed them
+    document.getElementById('replayBtn').onclick = playAgain;
+    document.getElementById('submitBtn').onclick = submitMove;
+    document.getElementById('mainMenuBtn').onclick = returnToMainMenu;
+    const progressBar = document.getElementById('puzzleProgress');
+    if (progressBar) progressBar.remove();
 }
 
 function playAgain() {
